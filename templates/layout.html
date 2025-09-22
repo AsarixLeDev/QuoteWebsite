@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width,initial-scale=1" name="viewport">
+    <title>{{ site_name }}</title>
+    <link href="{{ url_for('static', filename='styles.css') }}" rel="stylesheet">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-row">
+    <div class="brand">
+      <a class="link" href="{{ url_for('core.dashboard') }}">{{ site_name }}</a>
+    </div>
+
+    <!-- Icônes fixes à droite (toujours visibles) -->
+    <div class="nav-icons">
+      {% if has_spotify %}
+        <a class="icon-btn" href="{{ url_for('spotify.connect') }}" title="{{ 'Spotify connecté' if spotify_connected else 'Se connecter à Spotify' }}">🎧</a>
+      {% endif %}
+      {% if current_user.is_authenticated %}
+        <a class="icon-btn" href="{{ url_for('core.logout_view') }}" title="Se déconnecter">⎋</a>
+      {% endif %}
+      <!-- même style que les carrés blancs -->
+      <button class="icon-btn nav-toggle" aria-expanded="false" aria-controls="nav-menu" title="Menu">☰</button>
+    </div>
+  </div>
+
+  <!-- Menu principal : gauche = nav ; droite = actions -->
+  <div id="nav-menu" class="nav-menu">
+    {% if current_user.is_authenticated %}
+      <div class="nav-left">
+        <span class="badge user"
+              title="Connecté : {{ current_user.get_id() }}{% if current_user.is_admin %} (admin){% endif %}">
+          <span class="label">Connecté :</span>
+          <span class="uname">{{ current_user.get_id() }}</span>
+          {% if current_user.is_admin %}
+            <span class="role">(admin)</span>
+            <span class="admin-chip" aria-label="Admin" title="Admin">A</span>
+          {% endif %}
+        </span>
+
+        <a class="btn-nav" href="{{ url_for('core.dashboard') }}">Tableau de bord</a>
+        {% if current_user.is_admin %}
+          <a class="btn-nav" href="{{ url_for('texts.new_text') }}">Nouveau texte</a>
+          <a class="btn-nav" href="{{ url_for('core.admin_import') }}">Importer</a>
+          <a class="btn-nav" href="{{ url_for('core.admin_backup') }}">Télécharger backup</a>
+        {% endif %}
+      </div>
+
+      <div class="nav-right">
+        {% if has_spotify %}
+          {% if spotify_connected %}
+            <a class="btn-nav success" href="{{ url_for('spotify.connect') }}">Spotify connecté</a>
+            <a class="btn-nav" href="{{ url_for('spotify.disconnect') }}">Déconnecter Spotify</a>
+          {% else %}
+            <a class="btn-nav" href="{{ url_for('spotify.connect') }}">Se connecter Spotify</a>
+          {% endif %}
+        {% endif %}
+        <a class="btn-nav danger" href="{{ url_for('core.logout_view') }}">Se déconnecter</a>
+      </div>
+    {% else %}
+      <div class="nav-left">
+        <a class="btn-nav" href="{{ url_for('core.login') }}">Se connecter</a>
+      </div>
+    {% endif %}
+  </div>
+</nav>
+
+<script>
+(function(){
+  const btn  = document.querySelector('.nav-toggle');
+  const menu = document.getElementById('nav-menu');
+  const left = document.querySelector('.nav-left');
+  const right= document.querySelector('.nav-right');
+
+  function setCollapsed(on){
+    menu.classList.toggle('force-collapse', on);
+    btn.classList.toggle('show', on);
+    if(!on){ menu.classList.remove('open'); }
+  }
+
+  function recompute(){
+    // mesure propre (même si déjà replié)
+    const wasDisplay = menu.style.display;
+    menu.style.display = 'flex';
+    const need = (left && right) ? (left.scrollWidth + right.scrollWidth + 16 > menu.clientWidth) : false;
+    menu.style.display = wasDisplay;
+
+    const isNarrow = window.matchMedia('(max-width: 720px)').matches;
+    setCollapsed(need || isNarrow);
+
+    // Compacte le badge si la partie gauche déborde
+    const badge = document.querySelector('.badge.user');
+    if (badge && left) {
+      badge.classList.toggle('compact', left.scrollWidth > left.clientWidth);
+    }
+  }
+
+  btn.addEventListener('click', ()=>{
+    const open = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', String(!open));
+    menu.classList.toggle('open', !open);
+  });
+
+  window.addEventListener('resize', recompute);
+  document.addEventListener('DOMContentLoaded', ()=>{ setTimeout(recompute, 50); });
+})();
+</script>
+
+
+
+
+{% with messages = get_flashed_messages() %}
+{% if messages %}
+<div class="flash-list">
+    {% for m in messages %}
+    <div class="flash">{{ m }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<main class="container">
+    {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

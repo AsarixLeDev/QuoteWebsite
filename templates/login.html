@@ -1,0 +1,22 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="card" style="max-width:480px; margin: 0 auto;">
+    <h2 style="margin-top:0;">Se connecter</h2>
+    <form autocomplete="off" method="post">
+        {% if request.args.get('next') %}
+        <input name="next" type="hidden" value="{{ request.args.get('next') }}">
+        {% endif %}
+
+        <label for="username">Nom d’utilisateur</label>
+        <input autofocus class="input" id="username" name="username" required type="text">
+
+        <label for="password" style="margin-top:10px;">Mot de passe</label>
+        <input class="input" id="password" name="password" required type="password">
+
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="button" type="submit">Connexion</button>
+            <a class="button secondary" href="{{ url_for('core.index') }}">Annuler</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

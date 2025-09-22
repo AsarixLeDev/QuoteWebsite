@@ -1,0 +1,24 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Importer</h2>
+<div class="card">
+    <p class="text-muted">
+        Importez un <code>backup.json</code> ou un <code>backup.zip</code> (avec <code>backup.json</code> + dossier
+        <code>assets/</code>).
+    </p>
+    <form enctype="multipart/form-data" method="post">
+        <label for="file">Fichier (.json ou .zip)</label>
+        <input accept=".json,.zip" class="input" id="file" name="file" required type="file">
+
+        <label class="checkbox-pill" style="margin-top:10px; width:max-content;">
+            <input name="replace_all" type="checkbox" value="1">
+            Tout remplacer (textes &amp; utilisateurs)
+        </label>
+
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="button" type="submit">Importer</button>
+            <a class="button secondary" href="{{ url_for('core.dashboard') }}">Annuler</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
