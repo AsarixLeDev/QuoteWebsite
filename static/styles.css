@@ -1,592 +1,267 @@
-/* Pastel palette */
-:root {
-  --bg: #f9fbfc;
-  --card: #ffffff;
-  --text: #0d1b2a;
-  --muted: #4c5a67;
-  --primary: #68b6ff;
-  /* pastel blue */
-  --accent1: #ffef9f;
-  /* pastel yellow */
-  --accent2: #b8f3c8;
-  /* pastel green */
-  --border: #e5eef6;
-  --shadow: 0 4px 16px rgba(13, 27, 42, 0.08);
+/* =================== Pastel palette =================== */
+:root{
+  --bg:#f9fbfc;
+  --card:#ffffff;
+  --text:#0d1b2a;
+  --muted:#4c5a67;
+  --primary:#68b6ff;   /* pastel blue */
+  --accent1:#ffef9f;   /* pastel yellow */
+  --accent2:#b8f3c8;   /* pastel green */
+  --border:#e5eef6;
+  --shadow:0 4px 16px rgba(13,27,42,.08);
+
+  /* UI */
+  --btn-h:44px;        /* hauteur unifiée des boutons (mobile friendly) */
 }
 
-* {
-  box-sizing: border-box;
+*{ box-sizing:border-box; }
+
+html,body{
+  margin:0; padding:0;
+  background:var(--bg); color:var(--text);
+  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif;
+  line-height:1.5;
+  overflow-x:hidden;                  /* empêche le glisser horizontal */
+}
+body{ touch-action:pan-y; overscroll-behavior-x:none; }
+
+/* =================== Layout / cards =================== */
+.container{ max-width:1100px; margin:18px auto; padding:0 14px; }
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  box-shadow:var(--shadow);
+  padding:14px;
+}
+.card.subtle{ background:#fbfdff; }
+
+h1,h2,h3{ margin:10px 0; }
+.text-muted{ color:var(--muted); }
+
+/* =================== Buttons / Pills =================== */
+.button,.btn-nav,.badge,.checkbox-pill{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-height:var(--btn-h);
+  padding:0 14px; line-height:1.1;
+  border-radius:999px; text-decoration:none; cursor:pointer; color:var(--text);
+  transition:transform .06s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease;
 }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
-  line-height: 1.5;
+.button,.btn-nav{
+  border:1px solid #cde6ff;
+  background:linear-gradient(90deg,#e9f4ff,#f2fff6);
 }
+.button:hover,.btn-nav:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
 
-/* Layout */
-.container {
-  max-width: 1100px;
-  margin: 18px auto;
-  padding: 0 14px;
-}
+.button.secondary{ background:linear-gradient(90deg,#eef6ff,#fffbeb); border-color:#e6edf6; }
+.button.small{ padding:0 10px; font-size:.9rem; }
+.button.danger,.btn-nav.danger{ background:linear-gradient(90deg,#ffe9e9,#fff3f3); border-color:#f5c2c2; color:#7a1d1d; }
+.btn-nav.success{ background:linear-gradient(90deg,#e6fff1,#ddffe8); border-color:#b8f0c5; color:#0e5a2f; }
 
-.nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: linear-gradient(90deg, #e8f3ff, #f6ffe9);
-  border-bottom: 1px solid var(--border);
-  padding: 10px 14px;
-}
+.badge{ background:#eef7ff; border:1px solid #d8e6f7; font-size:.9rem; padding:0 10px; }
 
-.brand a {
-  text-decoration: none;
-  font-weight: 800;
-  color: var(--text);
-}
+/* Spotify flavour (optionnel) */
+.button.spotify{ background:linear-gradient(90deg,#e8fff1,#dbffe4); border:1px solid #b8f0c5; color:#0e5a2f; }
+.button.spotify.connected{ background:linear-gradient(90deg,#b7f3c8,#8ee6a6); border-color:#66d18a; color:#083e20; }
 
-.header-actions a {
-  text-decoration: none;
-  color: var(--text);
+/* =================== Forms =================== */
+label{ display:block; font-weight:700; margin:6px 0; }
+.input,.textarea,select{
+  width:100%; border:1px solid #dfe9f4; border-radius:12px; padding:10px 12px; background:#fff; outline:none;
+  transition:box-shadow .15s ease,border-color .15s ease;
 }
-
-.flex-spacer {
-  flex: 1 1 auto;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  padding: 14px;
-}
-
-.card.subtle {
-  background: #fbfdff;
-}
-
-/* Typography */
-h1,
-h2,
-h3 {
-  margin: 10px 0;
-}
-
-.text-muted {
-  color: var(--muted);
-}
-
-/* Buttons */
-.button {
-  display: inline-block;
-  padding: 10px 14px;
-  border-radius: 999px;
-  border: 1px solid #cde6ff;
-  background: linear-gradient(90deg, #e9f4ff, #f2fff6);
-  text-decoration: none;
-  color: var(--text);
-  cursor: pointer;
-  transition: transform .04s ease, box-shadow .2s ease;
-}
-
-.button:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow);
-}
-
-.button:disabled {
-  opacity: .6;
-  cursor: not-allowed;
-}
-
-.button.secondary {
-  background: linear-gradient(90deg, #eef6ff, #fffbeb);
-  border-color: #e6edf6;
-}
-
-.badge {
-  background: #eef7ff;
-  border: 1px solid #d8e6f7;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: .9rem;
-}
-
-/* Forms */
-label {
-  display: block;
-  font-weight: 700;
-  margin: 6px 0;
-}
-
-.input,
-.textarea,
-select {
-  width: 100%;
-  border: 1px solid #dfe9f4;
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: #ffffff;
-  outline: none;
-  transition: box-shadow .15s ease, border-color .15s ease;
-}
-
-.input:focus,
-.textarea:focus,
-select:focus {
-  border-color: #a6d4ff;
-  box-shadow: 0 0 0 3px rgba(104, 182, 255, .2);
-}
-
-/* textarea: pas de redimensionnement horizontal */
-.textarea {
-  resize: vertical;
-  /* pas de delta x */
-  min-height: 120px;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-@media (max-width: 720px) {
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-}
+.input:focus,.textarea:focus,select:focus{ border-color:#a6d4ff; box-shadow:0 0 0 3px rgba(104,182,255,.2); }
+.textarea{ resize:vertical; min-height:120px; }  /* pas de delta X */
+.form-row{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+@media (max-width:720px){ .form-row{ grid-template-columns:1fr; } }
 
 /* Checkbox pill (permissions) */
-.checkbox-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid #e6edf6;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #ffffff;
-  cursor: pointer;
-  user-select: none;
+.checkbox-pill{ gap:8px; border:1px solid #e6edf6; background:#fff; user-select:none; }
+.checkbox-pill input{ accent-color:#65d091; }
+.chip-group{ display:flex; gap:8px; flex-wrap:wrap; }
+
+/* =================== Links / flashes =================== */
+.link{ color:#0b6bdc; text-decoration:none; }
+.link:hover{ text-decoration:underline; }
+.flash-list{ margin:14px auto; max-width:900px; padding:0 14px; }
+.flash{ background:linear-gradient(90deg,#fff9db,#f0fff3); border:1px solid #f2e8aa; padding:10px 12px; border-radius:12px; margin-bottom:8px; }
+
+/* =================== Media wrappers =================== */
+.iframe-wrap{ position:relative; width:100%; padding-top:56.25%; border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
+.iframe-wrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+.grid article img{ background:#f6f9fc; }
+
+/* YouTube audio/video switch */
+.switch{ display:inline-flex; align-items:center; gap:8px; user-select:none; }
+.switch input{
+  appearance:none; width:38px; height:22px; border-radius:999px; background:#e9eef5; position:relative; cursor:pointer; outline:none; transition:background .2s ease;
 }
-
-.checkbox-pill input {
-  accent-color: #65d091;
+.switch input:checked{ background:#b7f3c8; }
+.switch input::after{
+  content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; background:#fff; border-radius:50%; box-shadow:var(--shadow); transition:left .2s ease;
 }
+.switch input:checked::after{ left:19px; }
 
-.chip-group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+/* Utils */
+hr{ border:none; border-top:1px solid var(--border); margin:14px 0; }
+.progress{ width:100%; height:10px; border-radius:999px; background:#eef3f8; overflow:hidden; border:1px solid #e2ebf5; }
+.progress-bar{ height:100%; background:linear-gradient(90deg,#b7f3c8,#8ee6a6); transition:width .25s ease; }
+.inline-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+
+/* =================== Header / Navigation =================== */
+.nav{
+  position:sticky; top:0; z-index:10;
+  background:linear-gradient(90deg,#e8f3ff,#f6ffe9);
+  border-bottom:1px solid var(--border);
 }
-
-/* Spotify button (in nav) */
-.button.spotify {
-  background: linear-gradient(90deg, #e8fff1, #dbffe4);
-  border: 1px solid #b8f0c5;
-  color: #0e5a2f;
+.nav-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px;
 }
+.brand a{ text-decoration:none; font-weight:800; color:var(--text); }
 
-.button.spotify.connected {
-  background: linear-gradient(90deg, #b7f3c8, #8ee6a6);
-  border-color: #66d18a;
-  color: #083e20;
+/* Icônes fixes à droite */
+.nav-icons{ display:flex; align-items:center; gap:6px; }
+.icon-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:36px; height:36px; border-radius:10px; border:1px solid #dfe9f4; background:#fff; cursor:pointer; text-decoration:none;
+  transition:transform .06s ease, box-shadow .2s ease, border-color .2s ease;
 }
+.icon-btn:hover{ transform:translateY(-1px); box-shadow:var(--shadow); border-color:#b7d6ff; }
 
-/* Links */
-.link {
-  color: #0b6bdc;
-  text-decoration: none;
-}
-
-.link:hover {
-  text-decoration: underline;
-}
-
-/* Flash messages */
-.flash-list {
-  margin: 14px auto;
-  max-width: 900px;
-  padding: 0 14px;
-}
-
-.flash {
-  background: linear-gradient(90deg, #fff9db, #f0fff3);
-  border: 1px solid #f2e8aa;
-  padding: 10px 12px;
-  border-radius: 12px;
-  margin-bottom: 8px;
-}
-
-/* Images & iframes */
-.iframe-wrap {
-  position: relative;
-  width: 100%;
-  padding-top: 56.25%;
-  /* 16:9 */
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: var(--shadow);
-}
-
-.iframe-wrap iframe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-/* Dashboard grid (quick) */
-.grid article img {
-  background: #f6f9fc;
-}
-
-/* Switch (YouTube audio/video) */
-.switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  user-select: none;
-}
-
-.switch input {
-  appearance: none;
-  width: 38px;
-  height: 22px;
-  border-radius: 999px;
-  background: #e9eef5;
-  position: relative;
-  cursor: pointer;
-  outline: none;
-  transition: background .2s ease;
-}
-
-.switch input:checked {
-  background: #b7f3c8;
-}
-
-.switch input::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
-  background: #fff;
-  border-radius: 50%;
-  box-shadow: var(--shadow);
-  transition: left .2s ease;
-}
-
-.switch input:checked::after {
-  left: 19px;
-}
-
-/* Utility */
-hr {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 14px 0;
-}
-
-.progress {
-  width: 100%;
-  height: 10px;
-  border-radius: 999px;
-  background: #eef3f8;
-  overflow: hidden;
-  border: 1px solid #e2ebf5;
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #b7f3c8, #8ee6a6);
-  transition: width .25s ease;
-}
-
-.inline-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.button.small {
-  padding: 6px 10px;
-  font-size: .9rem;
-}
-
-.button.danger {
-  background: linear-gradient(90deg, #ffe9e9, #fff3f3);
-  border-color: #f5c2c2;
-  color: #7a1d1d;
-}
-
-/* ===== Header responsive ===== */
-.nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: linear-gradient(90deg, #e8f3ff, #f6ffe9);
-  border-bottom: 1px solid var(--border);
-}
-
-.nav-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 14px;
-}
-
-.brand a {
-  text-decoration: none;
-  font-weight: 800;
-  color: var(--text);
-}
-
-/* Icônes fixes à droite (toujours visibles) */
-.nav-icons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid #dfe9f4;
-  background: #fff;
-  cursor: pointer;
-  text-decoration: none;
-  transition: transform .06s ease, box-shadow .2s ease, border-color .2s ease;
-}
-
-.icon-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow);
-  border-color: #b7d6ff;
-}
-
-/* Panneau nav (desktop = en ligne, mobile = replié) */
-.nav-menu {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-}
-
-.nav-toggle {
-  display: none;
-  border: 1px solid #dfe9f4;
-  background: #fff;
-  border-radius: 10px;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-
-/* Badge utilisateur (ellipses) */
-.badge.user {
-  max-width: 40vw;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.badge.user .label {
-  opacity: .8;
-}
-
-@media (max-width: 480px) {
-  .badge.user {
-    max-width: 55vw;
-  }
-
-  .badge.user .label {
-    display: none;
-  }
-
-  /* cache “Connecté :” en extra-étroit */
-}
-
-/* Boutons nav (bordures + anim) */
-.btn-nav {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid #cde6ff;
-  background: linear-gradient(90deg, #e9f4ff, #f2fff6);
-  color: var(--text);
-  text-decoration: none;
-  transition: transform .06s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease;
-}
-
-.btn-nav:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow);
-  border-color: #9ac9ff;
-}
-
-.btn-nav.success {
-  background: linear-gradient(90deg, #e6fff1, #ddffe8);
-  border-color: #b8f0c5;
-  color: #0e5a2f;
-}
-
-.btn-nav.danger {
-  background: linear-gradient(90deg, #ffe9e9, #fff3f3);
-  border-color: #f5c2c2;
-  color: #7a1d1d;
-}
-
-/* Mobile: nav repliée */
-@media (max-width: 720px) {
-  .nav-menu {
-    display: none;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    padding: 10px 14px 14px;
-  }
-
-  .nav-menu.open {
-    display: flex;
-  }
-
-  .nav-toggle {
-    display: inline-flex;
-  }
-
-  .btn-nav {
-    width: 100%;
-  }
-}
-
-/* (si besoin) Desktop garde l’ancien alignement */
-@media (min-width: 721px) {
-  .nav-menu {
-    padding-top: 0;
-  }
-}
-
-/* Groupes dans la nav : gauche = navigation, droite = actions */
+/* Menu principal */
 .nav-menu{
   display:flex; align-items:center; gap:10px; padding:8px 14px;
   justify-content:space-between; flex-wrap:nowrap;
 }
 .nav-left{
   display:flex; align-items:center; gap:10px;
-  flex:1 1 auto; min-width:0; overflow:hidden; /* autorise la compaction */
+  flex:1 1 auto; min-width:0; overflow:hidden;   /* prend la place dispo */
 }
 .nav-right{
   display:flex; align-items:center; gap:10px;
-  flex:0 0 auto; /* ancré à droite, non compressé */
+  margin-left:auto; flex:0 0 auto;               /* pousse à droite */
 }
 
-/* Badge utilisateur : mode compact quand manque de place */
+/* Badge utilisateur : compact si manque de place */
+.badge.user{
+  max-width:40vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  display:inline-flex; gap:6px; align-items:center;
+}
+.badge.user .label{ opacity:.8; }
 .admin-chip{
-  display:none; width:16px; height:16px; border-radius:999px;
-  background:#ffe1e1; color:#a41313; font-weight:800; font-size:10px;
-  align-items:center; justify-content:center; border:1px solid #ffbcbc;
+  display:none; width:16px; height:16px; border-radius:999px; background:#ffe1e1; color:#a41313;
+  font-weight:800; font-size:10px; align-items:center; justify-content:center; border:1px solid #ffbcbc;
 }
-.badge.user.compact .label{ display:none; }   /* cache "Connecté :" */
-.badge.user.compact .role{ display:none; }    /* cache "(admin)" */
-.badge.user.compact .admin-chip{ display:inline-flex; } /* montre le A rouge */
-.badge.user{ white-space:nowrap; }
+.badge.user.compact .label,.badge.user.compact .role{ display:none; }
+.badge.user.compact .admin-chip{ display:inline-flex; }
 
-/* Mobile : menu en colonne (les icônes restent visibles en haut) */
-@media (max-width: 720px){
+@media (max-width:480px){
+  .badge.user{ max-width:55vw; }
+  .badge.user .label{ display:none; } /* cache "Connecté :" très étroit */
+}
+
+/* Burger (même style que les carrés) */
+.nav-toggle{ display:none; }
+.nav-toggle.show{ display:inline-flex; }
+
+/* Mode replié (mobile) */
+@media (max-width:720px){
   .nav-menu{ display:none; flex-direction:column; align-items:stretch; gap:8px; padding:10px 14px 14px; }
   .nav-menu.open{ display:flex; }
+
+  /* grille régulière & mêmes hauteurs */
+  .nav-menu.open .nav-left,
+  .nav-menu.open .nav-right{
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;
+  }
   .btn-nav{ width:100%; }
-  .nav-left, .nav-right{ flex:0 0 auto; min-width:auto; overflow:visible; }
+}
+@media (max-width:420px){
+  .nav-menu.open .nav-left, .nav-menu.open .nav-right{ grid-template-columns:1fr; }
 }
 
-/* Groupes nav : gauche/ droite */
-.nav-menu{
-  display:flex; align-items:center; gap:10px; padding:8px 14px;
-  justify-content:space-between; flex-wrap:nowrap;
-}
-.nav-left{ display:flex; align-items:center; gap:10px; flex:1 1 auto; min-width:0; overflow:hidden; }
-.nav-right{ display:flex; align-items:center; gap:10px; flex:0 0 auto; }
+/* Sécurité anti-débordement */
+.container,.nav,.nav-menu,.grid,.card{ max-width:100%; }
 
-/* Burger : même style que les "carrés blancs" + visibilité conditionnelle */
-.nav-toggle{ display:none; }
-.nav-toggle.show{ display:inline-flex; } /* montré quand force-collapse */
-
-/* Mode "forcé" en menu (quand l'espace manque, même sur largeurs desktop) */
-.nav-menu.force-collapse{ display:none; }
-.nav-menu.force-collapse.open{
-  display:flex; flex-direction:column; align-items:stretch; gap:8px; padding:10px 14px 14px;
+/* === paramètres mobiles === */
+:root{
+  --btn-h: 44px;      /* hauteur uniforme */
+  --btn-w: 240px;     /* largeur uniforme des boutons en mobile */
 }
 
-/* Badge user compact (si manque de place) */
-.admin-chip{
-  display:none; width:16px; height:16px; border-radius:999px;
-  background:#ffe1e1; color:#a41313; font-weight:800; font-size:10px;
-  align-items:center; justify-content:center; border:1px solid #ffbcbc;
+/* Le badge "Connecté" devient visuellement un bouton comme les autres */
+.badge.user{
+  font-size: 1rem;
+  min-height: var(--btn-h);
+  padding: 0 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #eef7ff; border:1px solid #d8e6f7; border-radius:999px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.badge.user.compact .label{ display:none; }
+
+/* Empilement centré en mobile, largeur et hauteur forcées */
+@media (max-width: 720px){
+  .nav-menu.open .nav-left,
+  .nav-menu.open .nav-right{
+    display: flex;
+    flex-direction: column;
+    align-items: center;       /* centre horizontalement chaque bouton */
+    gap: 10px;
+  }
+
+  .btn-nav,
+  .badge.user{
+    width: var(--btn-w);
+    height: var(--btn-h);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;   /* garde même hauteur "quoi qu'il en coûte" */
+    text-align: center;
+  }
+}
+
+/* Si la place manque vraiment : ne garder que l’icône A (admin) */
+.badge.user.compact .label,
+.badge.user.compact .uname,
 .badge.user.compact .role{ display:none; }
 .badge.user.compact .admin-chip{ display:inline-flex; }
 
-/* Mobile: le comportement existant reste valable */
+
+/* largeur uniforme des boutons en mobile */
+:root { --btn-w: 260px; } /* ajuste 240–280 si tu préfères */
+
 @media (max-width: 720px){
-  .nav-menu{ display:none; flex-direction:column; align-items:stretch; gap:8px; padding:10px 14px 14px; }
-  .nav-menu.open{ display:flex; }
-  .btn-nav{ width:100%; }
-  .nav-left,.nav-right{ flex:0 0 auto; min-width:auto; overflow:visible; }
-}
-
-/* Hauteur unifiée pour TOUT ce qui ressemble à un bouton */
-:root { --btn-h: 44px; } /* 44px = taille “tap target” mobile confortable */
-
-.button,
-.btn-nav,
-.badge,
-.checkbox-pill {
-  min-height: var(--btn-h);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1.1;
-  padding-top: 0; padding-bottom: 0;  /* lisse la hauteur */
-}
-
-/* Regroupe joliment en lignes régulières sur mobile */
-@media (max-width: 720px){
+  /* empilement et alignement à droite */
   .nav-menu.open .nav-left,
-  .nav-menu.open .nav-right {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+  .nav-menu.open .nav-right{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;      /* <<< tout à droite */
+    gap:10px;
+    width:100%;
   }
-  /* sur très étroit, passe en 1 colonne proprement */
-  @media (max-width: 420px){
-    .nav-menu.open .nav-left,
-    .nav-menu.open .nav-right { grid-template-columns: 1fr; }
+
+  /* même largeur/hauteur pour TOUS les boutons + le badge */
+  .nav-menu.open .btn-nav,
+  .nav-menu.open .button,
+  .nav-menu.open .badge{       /* .badge couvre aussi .badge.user */
+    width:min(var(--btn-w),100%);
+    height:var(--btn-h);
+    justify-content:center;
+    text-align:center;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  /* le badge "connecté" a le même look et la même taille */
+  .nav-menu.open .badge.user{
+    font-size:1rem;
+    padding:0 14px;
+    background:#eef7ff;
+    border:1px solid #d8e6f7;
+    border-radius:999px;
   }
 }
 
-/* Bloque le scroll horizontal & les gestes latéraux */
-html, body { overflow-x: hidden; }
-body { touch-action: pan-y; overscroll-behavior-x: none; }
-
-/* Sécurité : évite qu’un élément dépasse en X */
-.container, .nav, .nav-menu, .grid, .card { max-width: 100%; }

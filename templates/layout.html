@@ -41,7 +41,7 @@
           {% endif %}
         </span>
 
-        <a class="btn-nav" href="{{ url_for('core.dashboard') }}">Tableau de bord</a>
+        <a class="btn-nav" href="{{ url_for('core.dashboard') }}">Backboard</a>
         {% if current_user.is_admin %}
           <a class="btn-nav" href="{{ url_for('texts.new_text') }}">Nouveau texte</a>
           <a class="btn-nav" href="{{ url_for('core.admin_import') }}">Importer</a>
@@ -108,6 +108,58 @@
   document.addEventListener('DOMContentLoaded', ()=>{ setTimeout(recompute, 50); });
 })();
 </script>
+<script>
+(function(){
+  function isAdmin(badge){ return !!badge.querySelector('.admin-chip'); }
+
+  function compactBadge(){
+    const badge = document.querySelector('.badge.user') || document.querySelector('.badge');
+    if(!badge) return;
+
+    // force la même taille que les boutons en mobile
+    const isMobile = window.matchMedia('(max-width: 720px)').matches;
+    if(isMobile){
+      badge.style.width  = 'min(var(--btn-w), 100%)';
+      badge.style.height = 'var(--btn-h)';
+    } else {
+      badge.style.width = badge.style.height = '';
+    }
+
+    const menu = document.getElementById('nav-menu');
+    const menuOpen = !!(menu && menu.classList.contains('open'));
+    const veryNarrow = window.matchMedia('(max-width: 480px)').matches;
+
+    const overflow   = badge.scrollWidth > badge.clientWidth;
+    const forceSmall = veryNarrow || (menuOpen && isMobile);
+    const makeCompact = overflow || forceSmall;
+
+    badge.classList.toggle('compact', makeCompact);
+
+    // contenu : admin => pastille A, sinon => uniquement username
+    const children = Array.from(badge.children);
+    const unameEl  = badge.querySelector('.uname');
+    const chipEl   = badge.querySelector('.admin-chip');
+
+    if (makeCompact){
+      if (isAdmin(badge)){
+        children.forEach(el => { if (el !== chipEl) el.style.display = 'none'; });
+        if (chipEl) chipEl.style.display = 'inline-flex';
+      } else {
+        children.forEach(el => { if (el !== unameEl) el.style.display = 'none'; });
+        if (unameEl) unameEl.style.display = '';
+      }
+    } else {
+      children.forEach(el => { el.style.display = ''; });
+    }
+  }
+
+  window.addEventListener('resize', compactBadge);
+  document.addEventListener('DOMContentLoaded', () => setTimeout(compactBadge, 50));
+  const btn = document.querySelector('.nav-toggle');
+  if (btn){ btn.addEventListener('click', () => setTimeout(compactBadge, 50)); }
+})();
+</script>
+
 
 
 
