@@ -553,3 +553,40 @@ hr {
   .btn-nav{ width:100%; }
   .nav-left,.nav-right{ flex:0 0 auto; min-width:auto; overflow:visible; }
 }
+
+/* Hauteur unifiée pour TOUT ce qui ressemble à un bouton */
+:root { --btn-h: 44px; } /* 44px = taille “tap target” mobile confortable */
+
+.button,
+.btn-nav,
+.badge,
+.checkbox-pill {
+  min-height: var(--btn-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+  padding-top: 0; padding-bottom: 0;  /* lisse la hauteur */
+}
+
+/* Regroupe joliment en lignes régulières sur mobile */
+@media (max-width: 720px){
+  .nav-menu.open .nav-left,
+  .nav-menu.open .nav-right {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  /* sur très étroit, passe en 1 colonne proprement */
+  @media (max-width: 420px){
+    .nav-menu.open .nav-left,
+    .nav-menu.open .nav-right { grid-template-columns: 1fr; }
+  }
+}
+
+/* Bloque le scroll horizontal & les gestes latéraux */
+html, body { overflow-x: hidden; }
+body { touch-action: pan-y; overscroll-behavior-x: none; }
+
+/* Sécurité : évite qu’un élément dépasse en X */
+.container, .nav, .nav-menu, .grid, .card { max-width: 100%; }

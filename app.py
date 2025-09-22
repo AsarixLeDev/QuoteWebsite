@@ -36,6 +36,8 @@ def create_app() -> Flask:
         static_folder=str(BASE_DIR / "static"),
         static_url_path="/static",
     )
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
     from storage import get_conf
     limits = (get_conf(read_db()).get("limits") or {})
