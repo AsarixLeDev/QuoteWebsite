@@ -19,10 +19,19 @@
       {% if has_spotify %}
         <a class="icon-btn" href="{{ url_for('spotify.connect') }}" title="{{ 'Spotify connecté' if spotify_connected else 'Se connecter à Spotify' }}">🎧</a>
       {% endif %}
+
       {% if current_user.is_authenticated %}
+        <!-- Bouton Amis -->
+        <a class="icon-btn" href="{{ url_for('friends.friends_home') }}" title="Mes amis">
+          👥
+          {% if friend_pending_count|default(0) > 0 %}
+            <span class="dot" aria-label="{{ friend_pending_count }} demande(s) en attente"></span>
+          {% endif %}
+        </a>
+
         <a class="icon-btn" href="{{ url_for('core.logout_view') }}" title="Se déconnecter">⎋</a>
       {% endif %}
-      <!-- même style que les carrés blancs -->
+
       <button class="icon-btn nav-toggle" aria-expanded="false" aria-controls="nav-menu" title="Menu">☰</button>
     </div>
   </div>

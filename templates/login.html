@@ -18,5 +18,10 @@
             <a class="button secondary" href="{{ url_for('core.index') }}">Annuler</a>
         </div>
     </form>
+    <div style="margin-top:8px;">
+        <a class="link" href="{{ url_for('auth_account.register') }}">Créer un compte</a>
+        ·
+        <a class="link" href="{{ url_for('auth_reset.request_reset') }}">Mot de passe oublié ?</a>
+    </div>
 </div>
 {% endblock %}

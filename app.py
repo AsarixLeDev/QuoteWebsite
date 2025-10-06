@@ -13,20 +13,16 @@ from paths import BASE_DIR
 # Blueprints
 from routes_core import core_bp
 from routes_texts import texts_bp
+from routes_auth_account import auth_account_bp
+from routes_spotify import spotify_bp
+from routes_auth_reset import auth_reset_bp  # ajout
+from routes_friends import friends_bp
 from storage import (
     read_db, write_db,
     get_user, list_users, add_user, set_user_password,
     set_admin_username, set_admin_password,
 )
 from werkzeug.exceptions import RequestEntityTooLarge
-
-
-try:
-    # Spotify est optionnel mais recommandé
-    from routes_spotify import spotify_bp
-except Exception as _e:
-    spotify_bp = None
-    print("[WARN] routes_spotify non importé :", _e)
 
 
 def create_app() -> Flask:
@@ -42,6 +38,14 @@ def create_app() -> Flask:
 
     storage_sql.init_db()
 
+    import crypto_server as cserv
+    try:
+        added = cserv.ensure_all_user_udk()
+        if added:
+            print(f"[crypto] UDK initialisées pour {added} utilisateur(s).")
+    except Exception as e:
+        print("[crypto] bootstrap UDK ignoré:", e)
+
     from storage import get_conf
     limits = (get_conf(read_db()).get("limits") or {})
     app.config['MAX_CONTENT_LENGTH'] = int(limits.get("max_request_mb", 1024)) * 1024 * 1024
@@ -52,6 +56,13 @@ def create_app() -> Flask:
     app.config.update(
         SECRET_KEY=conf.get("secret_key"),
         SEND_FILE_MAX_AGE_DEFAULT=0,  # utile en dev pour le cache
+    )
+
+    sec = (get_conf(read_db()).get("security") or {})
+    app.config.update(
+        SESSION_COOKIE_SECURE=bool(sec.get("session_cookie_secure", True)),
+        REMEMBER_COOKIE_SECURE=bool(sec.get("remember_cookie_secure", True)),
+        SESSION_COOKIE_SAMESITE=sec.get("session_cookie_samesite", "Lax"),
     )
 
     # Sanity check CSS
@@ -77,8 +88,10 @@ def create_app() -> Flask:
     # Blueprints
     app.register_blueprint(core_bp)
     app.register_blueprint(texts_bp)
-    if spotify_bp:
-        app.register_blueprint(spotify_bp)
+    app.register_blueprint(spotify_bp)
+    app.register_blueprint(auth_account_bp)
+    app.register_blueprint(auth_reset_bp)  # <<-- AJOUT
+    app.register_blueprint(friends_bp)
     jobs.init_app(app)
     return app
 

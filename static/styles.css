@@ -265,3 +265,13 @@ hr{ border:none; border-top:1px solid var(--border); margin:14px 0; }
   }
 }
 
+.icon-btn{ position:relative; }
+.icon-btn .dot{
+  position:absolute; top:4px; right:4px;
+  width:8px; height:8px; border-radius:50%;
+  background:#ff5a5a; box-shadow:0 0 0 2px #fff;
+}
+
+.badge { line-height: 1; }           /* déjà présent chez toi, OK si tu l’as */
+.badge.media { padding: 4px 6px; }   /* si tu veux une classe dédiée, sinon garde .badge */
+

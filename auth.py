@@ -4,6 +4,7 @@ from typing import Optional
 
 from flask import redirect, url_for, flash, request
 from flask_login import LoginManager, UserMixin
+import storage_sql as store
 
 from storage import read_db, get_conf, get_user
 
@@ -27,18 +28,22 @@ class LoginUser(UserMixin):
 @login_manager.user_loader
 def load_user(user_id: str) -> Optional[LoginUser]:
     """
-    Recharge un user depuis l'ID de session.
-    - admin : déterminé via config.admin.username
-    - sinon: présence dans users[]
+    Recharge l'utilisateur depuis la session. user_id est le username.
+    - Admin : défini par la config (stockée côté JSON mais c'est juste un nom).
+    - Sinon : on vérifie l'existence via SQL (storage_sql).
     """
-    db = read_db()
-    conf = get_conf(db)
-    admin_name = (conf.get("admin", {}) or {}).get("username") or "admin"
+    try:
+        admin_name = store.admin_username()  # lit la conf JSON via storage_sql
+    except Exception:
+        admin_name = "admin"
+
     if user_id and user_id.strip().lower() == admin_name.strip().lower():
         return LoginUser(admin_name, True)
-    u = get_user(db, user_id or "")
+
+    u = store.get_user(user_id)  # -> dict {'username':..., 'is_admin':..., ...} ou None
     if u:
         return LoginUser(u["username"], False)
+
     return None
 
 

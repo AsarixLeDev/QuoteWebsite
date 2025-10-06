@@ -1,265 +1,199 @@
 {% extends 'layout.html' %}
 {% block content %}
+
+{% set embed = text.embed if text.embed is defined else {'type':'none','src':None} %}
+
 <div class="card">
-    <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
-        <h2 style="margin:0;">{{ text.title or '(sans titre)' }}</h2>
-        <div class="text-muted">{{ text.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
-    </div>
-
-    {% if text.image_filename %}
-    <div style="margin:12px 0;">
-        <img alt="image" src="{{ url_for('core.uploaded_file', filename=text.image_filename) }}"
-             style="max-width:100%; border-radius:16px; box-shadow: var(--shadow);">
-    </div>
-    {% elif text.image_url %}
-    <div style="margin:12px 0;">
-        <img alt="image" src="{{ text.image_url }}"
-             style="max-width:100%; border-radius:16px; box-shadow: var(--shadow);">
-    </div>
+  <!-- Titre + date -->
+  <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
+    <h2 style="margin:0;">{{ text.title or '(sans titre)' }}</h2>
+    {% if text.date_dt is defined %}
+      <div class="text-muted">{{ text.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
+    {% elif text.date is defined %}
+      <div class="text-muted">{{ text.date }}</div>
     {% endif %}
+  </div>
 
-    {% if text.context %}
+  {% if current_user.is_admin and text.created_by %}
+    <div class="text-muted" style="margin-top:-4px;">par {{ text.created_by }}</div>
+  {% endif %}
+
+  <!-- Image -->
+  {% if text.image_filename %}
+    <div style="margin:12px 0;">
+      <img src="{{ url_for('core.uploaded_file', filename=text.image_filename) }}" alt="image"
+           style="max-width:100%; border-radius:16px; box-shadow: var(--shadow);">
+    </div>
+  {% elif text.image_url %}
+    <div style="margin:12px 0;">
+      <img src="{{ text.image_url }}" alt="image"
+           style="max-width:100%; border-radius:16px; box-shadow: var(--shadow);">
+    </div>
+  {% endif %}
+
+  <!-- Contexte -->
+  {% if text.context %}
     <p class="text-muted"><em>{{ text.context }}</em></p>
-    {% endif %}
+  {% endif %}
 
-    <div style="white-space: pre-wrap; line-height: 1.65;">{{ text.body }}</div>
+  <!-- Corps (déjà déchiffré côté serveur dans routes_texts.py) -->
+  <div style="white-space: pre-wrap; line-height: 1.65;">
+    {{ text.body }}
+  </div>
 
-    {% if text.music_url or text.embed and text.embed.type != 'none' %}
+  <!-- Musique -->
+  {% set has_music = (text.music_url or embed.type != 'none') %}
+  {% if has_music %}
     <hr>
 
-    {% if text.music_url and text.music_url.startswith('/uploads/') %}
-    <!-- Fichier local (upload ou extraction YouTube audio) -->
-    <audio controls style="width:100%">
-        <source src="{{ text.music_url }}">
-    </audio>
-    {% if text.music_original_url %}
-    <p class="text-muted" style="margin-top:6px;">Source originale : {{ text.music_original_url }}</p>
-    {% endif %}
-
-    {% elif text.embed.type == 'audio_direct' %}
-    <audio controls style="width:100%">
-        <source src="{{ text.embed.src }}">
-    </audio>
-
-    {% elif text.embed.type == 'spotify' %}
-    {% if text.spotify_connected %}
-    <!-- Utilisateur connecté : embed + bouton lecteur SDK -->
-    <iframe
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            frameborder="0"
-            loading="lazy"
-            src="{{ text.embed.src }}"
-            style="border-radius:12px; width:100%; height:152px;"></iframe>
-
-    <div style="margin-top:8px">
-        <button class="button" id="play-here">Lire ici (Spotify Premium)</button>
-        <small class="text-muted">Requiert Premium, HTTPS (prod) et autorisation Spotify.</small>
-    </div>
-    <script>
-        (function(){
-          const btn = document.getElementById('play-here');
-          if(!btn) return;
-          function loadSdk(){ return new Promise((res)=>{ if(window.Spotify&&window.Spotify.Player) return res(); const s=document.createElement('script'); s.src="https://sdk.scdn.co/spotify-player.js"; s.onload=res; document.body.appendChild(s); }); }
-          async function fetchToken(){ const r=await fetch("{{ url_for('spotify.token') }}"); if(!r.ok) throw new Error("not_connected"); return (await r.json()).access_token; }
-          async function startPlayback(deviceId, token, uris){
-            await fetch("https://api.spotify.com/v1/me/player", { method:"PUT", headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"}, body: JSON.stringify({ device_ids:[deviceId], play:true }) });
-            await fetch("https://api.spotify.com/v1/me/player/play?device_id="+encodeURIComponent(deviceId), { method:"PUT", headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"}, body: JSON.stringify({ uris }) });
-          }
-          btn.addEventListener('click', async ()=>{
-            btn.disabled=true;
-            try{
-              await loadSdk();
-              const token=await fetchToken();
-              const player=new Spotify.Player({ name:"Pastel Notes Player", getOAuthToken:cb=>cb(token), volume:0.8 });
-              player.addListener('initialization_error', e=>console.error(e.message));
-              player.addListener('authentication_error', e=>console.error(e.message));
-              player.addListener('account_error', e=>console.error(e.message));
-              player.addListener('playback_error', e=>console.error(e.message));
-              player.addListener('ready', async ({device_id})=>{
-                const uri="spotify:{{ 'track' if text.embed.kind=='track' else text.embed.kind }}:{{ text.embed.id }}";
-                try{ await startPlayback(device_id, token, [uri]); }catch(err){ console.error(err); alert("Impossible de démarrer la lecture Spotify."); }
-              });
-              const ok=await player.connect(); if(!ok) alert("Échec connexion du lecteur Spotify.");
-            }catch(e){
-              if(String(e.message).includes('not_connected')) alert("Connecte Spotify (bouton en haut) puis réessaie.");
-              else { console.error(e); alert("Erreur Spotify."); }
-            }finally{ btn.disabled=false; }
-          });
-        })();
-    </script>
-
-    {% else %}
-    <!-- Non connecté : aperçu + alternatives si disponibles -->
-    <div class="spotify-preview card" style="margin-top:8px;">
-        <div style="display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;">
-            {% if text.spotify_meta and text.spotify_meta.image %}
-            <img alt="" src="{{ text.spotify_meta.image }}"
-                 style="width:96px; height:96px; object-fit:cover; border-radius:12px;">
-            {% endif %}
-            <div style="flex:1 1 auto;">
-                <div style="font-weight:700;">
-                    {% if text.spotify_meta %}
-                    {{ text.spotify_meta.title }} — {{ text.spotify_meta.artists|join(', ') }}
-                    {% else %}
-                    Piste Spotify
-                    {% endif %}
-                </div>
-                <div class="text-muted" style="margin-top:4px;">
-                    Aperçu disponible pour les non abonnés :
-                </div>
-                {% if text.spotify_meta and text.spotify_meta.preview_url %}
-                <audio controls style="width:100%; margin-top:6px;">
-                    <source src="{{ text.spotify_meta.preview_url }}">
-                </audio>
-                {% else %}
-                <div class="text-muted" style="margin-top:6px;">Aucun extrait 30s fourni par Spotify.</div>
-                {% endif %}
-                <div class="actions-row" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
-                    <a class="button secondary" href="{{ text.embed.src }}" rel="noopener" target="_blank">Ouvrir sur
-                        Spotify</a>
-                    {% if text.alt_links and text.alt_links.youtube_search %}
-                    <a class="button secondary" href="{{ text.alt_links.youtube_search }}" rel="noopener"
-                       target="_blank">YouTube</a>
-                    {% endif %}
-                    {% if text.alt_links and text.alt_links.deezer_link %}
-                    <a class="button secondary" href="{{ text.alt_links.deezer_link }}" rel="noopener" target="_blank">Deezer</a>
-                    {% endif %}
-                    {% if text.alt_links and text.alt_links.soundcloud_search %}
-                    <a class="button secondary" href="{{ text.alt_links.soundcloud_search }}" rel="noopener"
-                       target="_blank">SoundCloud</a>
-                    {% endif %}
-                </div>
-                {% if text.alt_links and text.alt_links.deezer_embed %}
-                <div style="margin-top:10px;">
-                    <iframe allow="encrypted-media; clipboard-write; autoplay" allowtransparency="true" frameborder="0"
-                            height="180"
-                            loading="lazy" src="{{ text.alt_links.deezer_embed }}" title="Deezer"
-                            width="100%"></iframe>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    {% elif text.embed.type == 'youtube' %}
-    {% if text.youtube_mode == 'audio' %}
-    {% if text.music_url %}
-    <audio controls style="width:100%">
-        <source src="{{ text.music_url }}">
-    </audio>
-    <p class="text-muted" style="margin-top:6px;">Audio extrait de YouTube (source : {{ text.music_original_url or
-        'YouTube' }}).</p>
-    {% else %}
-    <div class="card" id="yt-job" style="background:#fbfdff;">
+    {# Cas spécial : YouTube en extraction audio (job en cours) #}
+    {% if text.youtube_mode == 'audio' and (not text.music_url) and text.yt_job_id %}
+      <div class="card subtle" id="yt-job" style="background:#fbfdff;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-            <div style="font-weight:700;">Chargement… extraction de l’audio YouTube</div>
-            {% if current_user.is_admin and text.yt_job_id %}
+          <div style="font-weight:700;">Chargement… extraction de l’audio YouTube</div>
+          {% if current_user.is_admin %}
             <div class="inline-actions">
-                <button class="button small danger" id="btn-cancel">Annuler</button>
-                <button class="button small secondary" id="btn-retry" style="display:none;">Relancer</button>
+              <button class="button small danger" id="btn-cancel">Annuler</button>
+              <button class="button small secondary" id="btn-retry" style="display:none;">Relancer</button>
             </div>
-            {% endif %}
+          {% endif %}
         </div>
         <div class="progress" style="margin-top:8px;">
-            <div class="progress-bar" id="yt-progress" style="width:0%"></div>
+          <div class="progress-bar" id="yt-progress" style="width:0%"></div>
         </div>
         <div class="text-muted" id="yt-msg" style="margin-top:6px;">Préparation…</div>
-    </div>
-    <script>
-        (function(){
-          const jobId = "{{ text.yt_job_id or '' }}";
-          const bar = document.getElementById('yt-progress');
-          const msg = document.getElementById('yt-msg');
-          const btnCancel = document.getElementById('btn-cancel');
-          const btnRetry = document.getElementById('btn-retry');
+      </div>
 
-          async function poll(){
-            try{
-              const r = await fetch("/jobs/"+jobId+"/status");
-              if(!r.ok){ msg.textContent="Job inconnu."; return; }
-              const j = await r.json();
-              bar.style.width = (j.progress||0)+"%";
-              msg.textContent = (j.state||"") + (j.message ? " — "+j.message : "");
-              if(j.state === "done"){ location.reload(); return; }
-              if(j.state === "error"){ if(btnRetry) btnRetry.style.display = 'inline-block'; if(btnCancel) btnCancel.disabled = true; return; }
-              if(j.state === "cancelled"){ msg.textContent = "Annulé"; if(btnRetry) btnRetry.style.display = 'inline-block'; return; }
-              setTimeout(poll, 1000);
-            }catch(e){ setTimeout(poll, 2000); }
-          }
+      <script>
+      (function(){
+        const jobId = "{{ text.yt_job_id }}";
+        const bar = document.getElementById('yt-progress');
+        const msg = document.getElementById('yt-msg');
+        const btnCancel = document.getElementById('btn-cancel');
+        const btnRetry  = document.getElementById('btn-retry');
 
-          {% if current_user.is_admin %}
-          if(btnCancel){
-            btnCancel.addEventListener('click', async ()=>{
-              btnCancel.disabled = true;
-              await fetch("/jobs/"+jobId+"/cancel", {method:"POST"});
-              setTimeout(poll, 300);
-            });
+        async function poll(){
+          try{
+            const r = await fetch("/jobs/"+jobId+"/status");
+            if(!r.ok){ if(msg) msg.textContent="Job inconnu."; return; }
+            const j = await r.json();
+            if(bar) bar.style.width = (j.progress||0)+"%";
+            if(msg) msg.textContent = (j.state||"") + (j.message ? " — "+j.message : "");
+            if(j.state === "done"){ location.reload(); return; }
+            if(j.state === "error"){ if(btnRetry) btnRetry.style.display='inline-block'; if(btnCancel) btnCancel.disabled=true; return; }
+            if(j.state === "cancelled"){ if(msg) msg.textContent="Annulé"; if(btnRetry) btnRetry.style.display='inline-block'; return; }
+            setTimeout(poll, 1000);
+          }catch(e){
+            setTimeout(poll, 2000);
           }
-          if(btnRetry){
-            btnRetry.addEventListener('click', async ()=>{
-              btnRetry.disabled = true;
-              const r = await fetch("/jobs/"+jobId+"/retry", {method:"POST"});
-              if(r.ok){
-                const j = await r.json();
-                // redirige vers la même page: le nouveau job sera pris en compte (yt_job_id mis à jour côté serveur)
-                location.reload();
-              }else{
-                btnRetry.disabled = false;
-              }
-            });
-          }
-          {% endif %}
+        }
 
-          if(jobId){ poll(); }
-        })();
-    </script>
-    {% endif %}
+        {% if current_user.is_admin %}
+        if(btnCancel){
+          btnCancel.addEventListener('click', async ()=>{
+            btnCancel.disabled = true;
+            await fetch("/jobs/"+jobId+"/cancel", {method:"POST"});
+            setTimeout(poll, 300);
+          });
+        }
+        if(btnRetry){
+          btnRetry.addEventListener('click', async ()=>{
+            btnRetry.disabled = true;
+            const r = await fetch("/jobs/"+jobId+"/retry", {method:"POST"});
+            if(r.ok) location.reload(); else btnRetry.disabled=false;
+          });
+        }
+        {% endif %}
+
+        if(jobId){ poll(); }
+      })();
+      </script>
+
     {% else %}
-    <div class="iframe-wrap">
+      {# 1) Fichier local (upload ou extraction terminée) #}
+      {% if text.music_url and text.music_url.startswith('/uploads/') %}
+        <audio controls style="width:100%"><source src="{{ text.music_url }}"></audio>
+        {% if text.music_original_url %}
+          <p class="text-muted" style="margin-top:6px;">Source originale : {{ text.music_original_url }}</p>
+        {% endif %}
+
+      {# 2) Audio direct #}
+      {% elif embed.type == 'audio_direct' %}
+        <audio controls style="width:100%"><source src="{{ embed.src }}"></audio>
+
+      {# 3) Spotify #}
+      {% elif embed.type == 'spotify' %}
         <iframe
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                frameborder="0"
-                loading="lazy"
-                src="{{ text.embed.src }}"
-                title="YouTube"></iframe>
-    </div>
-    {% endif %}
+          style="border-radius:12px; width:100%; height:152px;"
+          src="{{ embed.src }}"
+          frameborder="0"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy"></iframe>
 
-    {% elif text.embed.type == 'soundcloud' %}
-    <iframe allow="autoplay" frameborder="no" height="166" loading="lazy" scrolling="no" src="{{ text.embed.src }}"
-            width="100%"></iframe>
-
-    {% elif text.embed.type == 'deezer' %}
-    <iframe allow="encrypted-media; clipboard-write; autoplay" allowtransparency="true" frameborder="0"
-            height="{{ 180 if text.embed.kind == 'track' else 450 }}" loading="lazy" src="{{ text.embed.src }}"
-            title="Deezer" width="100%"></iframe>
-
-    {% elif text.embed.type == 'applemusic' %}
-    <iframe allow="autoplay *; encrypted-media *; clipboard-write"
+      {# 4) YouTube #}
+      {% elif embed.type == 'youtube' %}
+        <div class="iframe-wrap">
+          <iframe
+            src="{{ embed.src }}"
+            title="YouTube"
             frameborder="0"
-            height="175"
-            loading="lazy"
-            sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"
-            src="{{ text.embed.src }}"
-            style="width:100%; overflow:hidden; background:transparent;"></iframe>
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+            loading="lazy"></iframe>
+        </div>
 
-    {% else %}
-    <p>Musique : <a class="link" href="{{ text.music_url or text.embed.src }}" rel="noopener" target="_blank">{{
-        text.music_url or text.embed.src }}</a></p>
-    {% endif %}
-    {% endif %}
+      {# 5) SoundCloud #}
+      {% elif embed.type == 'soundcloud' %}
+        <iframe
+          width="100%" height="166"
+          scrolling="no" frameborder="no"
+          allow="autoplay"
+          src="{{ embed.src }}" loading="lazy"></iframe>
 
-    {% if current_user.is_admin %}
-    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=text.id) }}">Modifier</a>
-        <a class="button" href="{{ url_for('core.dashboard') }}">Retour</a>
-    </div>
-    {% else %}
-    <div style="margin-top:12px;">
-        <a class="button" href="{{ url_for('core.dashboard') }}">Retour</a>
-    </div>
+      {# 6) Deezer #}
+      {% elif embed.type == 'deezer' %}
+        <iframe
+          title="Deezer"
+          src="{{ embed.src }}"
+          width="100%"
+          height="{{ 180 if embed.kind == 'track' else 450 }}"
+          frameborder="0"
+          allowtransparency="true"
+          allow="encrypted-media; clipboard-write; autoplay"
+          loading="lazy"></iframe>
+
+      {# 7) Apple Music #}
+      {% elif embed.type == 'applemusic' %}
+        <iframe
+          allow="autoplay *; encrypted-media *; clipboard-write"
+          height="175"
+          style="width:100%; overflow:hidden; background:transparent;"
+          sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"
+          frameborder="0"
+          loading="lazy"
+          src="{{ embed.src }}"></iframe>
+
+      {# 8) Fallback : simple lien #}
+      {% else %}
+        {% if text.music_url %}
+          <p>Musique : <a class="link" href="{{ text.music_url }}" target="_blank" rel="noopener">{{ text.music_url }}</a></p>
+        {% endif %}
+      {% endif %}
     {% endif %}
+  {% endif %}
+
+  <!-- Actions -->
+  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+    {% set is_owner = (text.created_by is defined and text.created_by == current_user.get_id()) %}
+    {% if current_user.is_admin or is_owner %}
+      <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=text.id) }}">Modifier</a>
+      <form method="post" action="{{ url_for('texts.delete_text', text_id=text.id) }}"
+            onsubmit="return confirm('Supprimer ce texte ?');" style="margin:0;">
+        <button class="button danger" type="submit">Supprimer</button>
+      </form>
+    {% endif %}
+    <a class="button" href="{{ url_for('core.dashboard') }}">Retour</a>
+  </div>
 </div>
+
 {% endblock %}
