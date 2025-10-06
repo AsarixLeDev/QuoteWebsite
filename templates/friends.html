@@ -1,0 +1,73 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Mes amis</h2>
+
+<div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+
+  <div class="card">
+    <h3>Ajouter un ami</h3>
+    <form method="post" action="{{ url_for('friends.friends_request') }}">
+      <label for="to">Nom d'utilisateur</label>
+      <input class="input" id="to" name="to" type="text" required>
+      <div style="margin-top:8px;"><button class="button" type="submit">Envoyer une demande</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Mes amis</h3>
+    {% if data.accepted %}
+      <ul style="margin:0; padding-left:18px;">
+        {% for u in data.accepted %}
+          <li style="display:flex; gap:8px; align-items:center; justify-content:space-between;">
+            <div>
+              <a class="link" href="{{ url_for('friends.friend_texts', username=u) }}">{{ u }}</a>
+            </div>
+            <form method="post" action="{{ url_for('friends.friends_remove') }}" style="margin:0;">
+              <input type="hidden" name="other" value="{{ u }}">
+              <button class="button small danger" type="submit">Supprimer</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted">Pas encore d'amis sur PastelNotes.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>Demandes reçues</h3>
+    {% if data.pending_in %}
+      {% for u in data.pending_in %}
+        <form method="post" action="{{ url_for('friends.friends_respond') }}" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+          <span>{{ u }}</span>
+          <input type="hidden" name="other" value="{{ u }}">
+          <button class="button small" type="submit" name="accept" value="1">Accepter</button>
+          <button class="button small secondary" type="submit" name="accept" value="0">Refuser</button>
+        </form>
+      {% endfor %}
+    {% else %}
+      <p class="text-muted">Aucune demande reçue.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>Demandes envoyées</h3>
+    {% if data.pending_out %}
+      <ul style="margin:0; padding-left:18px;">
+        {% for u in data.pending_out %}
+          <li style="display:flex; gap:8px; align-items:center; justify-content:space-between;">
+            <span>{{ u }} — <span class="text-muted">En attente…</span></span>
+            <form method="post" action="{{ url_for('friends.friends_cancel') }}" style="margin:0;">
+              <input type="hidden" name="other" value="{{ u }}">
+              <button class="button small secondary" type="submit">Annuler</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted">Aucune demande envoyée.</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

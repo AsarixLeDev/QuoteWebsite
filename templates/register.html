@@ -1,0 +1,28 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="card" style="max-width:520px;margin:0 auto;">
+  <h2>Créer un compte</h2>
+  <form method="post" autocomplete="off">
+    <label for="username">Nom d'utilisateur</label>
+    <input class="input" id="username" name="username" required value="{{ username or '' }}" placeholder="ex. alice">
+
+    <label for="email">Email (optionnel)</label>
+    <input class="input" id="email" name="email" type="email" value="{{ email or '' }}" placeholder="ex. alice@mail.com">
+
+    <label for="password">Mot de passe</label>
+    <input class="input" id="password" name="password" type="password" required>
+
+    <label for="confirm">Confirmer le mot de passe</label>
+    <input class="input" id="confirm" name="confirm" type="password" required>
+
+    <div class="text-muted" style="margin-top:6px;">
+      L'email est facultatif. Sans email, vous pourrez demander à l'hôte de réinitialiser votre mot de passe en cas d'oubli.
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="button" type="submit">Créer mon compte</button>
+      <a class="button secondary" href="{{ url_for('core.login') }}">J'ai déjà un compte</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

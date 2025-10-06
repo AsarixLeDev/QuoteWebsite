@@ -4,7 +4,7 @@ import secrets
 import urllib.parse
 from datetime import datetime
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify
+from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
@@ -14,6 +14,8 @@ from storage import (
     read_db, write_db, get_conf, get_spotify_token_record
 )
 import storage_sql as store  # ORM SQL
+import crypto_server as cserv
+
 
 ALLOWED_IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
 ALLOWED_AUDIO_EXTS = {"mp3", "ogg", "wav", "m4a", "aac"}
@@ -240,19 +242,35 @@ def view_text(text_id: int):
     # VM
     vm = dict(t)
     vm["date_dt"] = datetime.fromisoformat(t["date"]) if t.get("date") else datetime.utcnow()
-    vm["embed"] = _detect_embed(t.get("music_url") or t.get("music_original_url"))
-    vm["yt_job_id"] = _yt_map_get(text_id)
 
-    # Spotify: si non connecté, meta + alternatives
-    if vm["embed"].get("type") == "spotify":
-        from spotify_utils import fetch_track_meta, build_alt_links
-        is_connected = bool(get_spotify_token_record(read_db(), current_user.get_id()))
-        vm["spotify_connected"] = is_connected
-        if not is_connected and vm["embed"].get("kind") == "track":
-            meta = fetch_track_meta(vm["embed"].get("id"))
-            if meta:
-                vm["spotify_meta"] = meta
-                vm["alt_links"] = build_alt_links(meta["title"], meta["artists"])
+    # déchiffre pour l’affichage
+    title = t.get("title");
+    body = t.get("body");
+    context = t.get("context")
+    if t.get("ciphertext") and t.get("cipher_nonce"):
+        try:
+            clear = cserv.decrypt_text_payload(t["created_by"], t["ciphertext"], t["cipher_nonce"])
+            title = clear.get("title") or title
+            body = clear.get("body")
+            context = clear.get("context")
+        except Exception:
+            title = title or "(indéchiffrable)";
+            body = "(indéchiffrable)";
+            context = None
+
+    vm["title"] = title or "(sans titre)"
+    vm["body"] = body
+    vm["context"] = context
+
+    # musique
+    src = t.get("music_url") or t.get("music_original_url")
+    vm["embed"] = _detect_embed(src)
+
+    # état spotify (si tu l’utilises)
+    try:
+        vm["spotify_connected"] = bool(get_spotify_token_record(read_db(), current_user.get_id()))
+    except Exception:
+        vm["spotify_connected"] = False
 
     return render_template("text_view.html", text=vm)
 
@@ -260,9 +278,6 @@ def view_text(text_id: int):
 @texts_bp.route("/texts/new", methods=["GET", "POST"])
 @login_required
 def new_text():
-    if not getattr(current_user, "is_admin", False):
-        from flask import abort
-        abort(403)
 
     # Liste des users (exclure l'admin du choix)
     admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
@@ -314,13 +329,18 @@ def new_text():
         elif music_url and _is_youtube(music_url):
             youtube_mode = "video"
 
-        # Création SQL
+        allowed_final_list = [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()]
+
+        clear = {"title": title, "body": body, "context": context_val}
+        enc = cserv.encrypt_text_payload(current_user.get_id(), clear)
+
         text_id = store.create_text(
             current_user.get_id(),
             {
-                "title": title,
-                "body": body,
-                "context": context_val,
+                "cipher_alg": enc["cipher_alg"],
+                "ciphertext": enc["ciphertext"],
+                "cipher_nonce": enc["cipher_nonce"],
+                "default_allow": (request.form.get("default_allow") == "1"),
                 "music_url": music_url,
                 "music_original_url": music_original_url,
                 "image_filename": img_name,
@@ -328,7 +348,7 @@ def new_text():
                 "image_original_url": image_remote_url if image_remote_url else None,
                 "date_dt": dt,
             },
-            [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()],
+            allowed_final_list,
         )
 
         if youtube_mode == "audio" and music_original_url:
@@ -397,6 +417,7 @@ def edit_text(text_id: int):
             "body": body,
             "context": context_val,
         }
+
         if date_dt:
             data_update["date_dt"] = date_dt
 
@@ -434,6 +455,16 @@ def edit_text(text_id: int):
         # Permissions
         allow_final = [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()]
 
+        clear = {"title": title, "body": body, "context": context_val}
+        enc = cserv.encrypt_text_payload(t["created_by"], clear)
+
+        data_update.update({
+            "cipher_alg": enc["cipher_alg"],
+            "ciphertext": enc["ciphertext"],
+            "cipher_nonce": enc["cipher_nonce"],
+        })
+        store.update_text(text_id, data_update, allow_final)
+
         # SQL update
         store.update_text(text_id, data_update, allow_final)
 
@@ -443,6 +474,27 @@ def edit_text(text_id: int):
     vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
     vm["yt_job_id"] = _yt_map_get(text_id)
     return render_template("text_form.html", is_new=False, users=usernames, text=vm)
+
+@texts_bp.route("/texts/<int:text_id>/delete", methods=["POST"])
+@login_required
+def delete_text(text_id: int):
+    # Récupérer le texte via la couche SQL
+    t = store.get_text_dict(text_id)
+    if not t:
+        abort(404)
+
+    # Droit : auteur ou admin
+    if (not getattr(current_user, "is_admin", False)) and (t["created_by"] != current_user.get_id()):
+        abort(403)
+
+    # Suppression cascade (text_access, etc.)
+    ok = store.delete_text(text_id)
+    if ok:
+        flash("Texte supprimé.")
+    else:
+        flash("Texte introuvable ou déjà supprimé.")
+
+    return redirect(url_for("core.dashboard"))
 
 
 # ---------- Jobs endpoints ----------

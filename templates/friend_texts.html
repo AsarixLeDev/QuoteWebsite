@@ -1,0 +1,33 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Textes de {{ friend }}</h2>
+
+{% if texts|length == 0 %}
+  <div class="card"><p class="text-muted">Aucun texte visible.</p></div>
+{% else %}
+  <div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
+    {% for t in texts %}
+      <article class="card" style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline;">
+          <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
+          <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
+        </div>
+        {% if t.image_filename %}
+          <img alt="" src="{{ url_for('core.uploaded_file', filename=t.image_filename) }}"
+               style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
+        {% elif t.image_url %}
+          <img alt="" src="{{ t.image_url }}" style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
+        {% endif %}
+        {% if t.body %}
+          <p style="margin:0; white-space:pre-wrap; line-height:1.5; max-height:7.2em; overflow:hidden;">
+            {{ t.body[:300] }}{% if t.body|length > 300 %}…{% endif %}
+          </p>
+        {% endif %}
+        <div style="display:flex; gap:8px; margin-top:auto; flex-wrap:wrap;">
+          <a class="button" href="{{ url_for('texts.view_text', text_id=t.id) }}">Ouvrir</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

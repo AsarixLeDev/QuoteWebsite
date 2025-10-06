@@ -3,127 +3,142 @@
 <h2 style="margin-bottom:10px;">{{ 'Tous les textes' if current_user.is_admin else 'Vos textes' }}</h2>
 
 {% if texts|length == 0 %}
-<div class="card">
+  <div class="card">
     <p>Aucun texte pour le moment.</p>
-    {% if current_user.is_admin %}
     <p><a class="button" href="{{ url_for('texts.new_text') }}">Créer un premier texte</a></p>
-    {% endif %}
-</div>
+  </div>
 {% else %}
-<div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
+  <div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
     {% for t in texts %}
-    <article class="card" style="display:flex; flex-direction:column; gap:8px;">
-        <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline;">
-            <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
-            <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
+      <article class="card" style="display:flex; flex-direction:column; gap:8px;">
+
+        <!-- En-tête -->
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline; flex-wrap:wrap;">
+          <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
+
+          <div style="display:flex; gap:8px; align-items:center;">
             {% if t.media_badge %}
-            <div class="badge" title="{{ t.media_badge.label }}">{{ t.media_badge.icon }} {{ t.media_badge.label }}
-            </div>
+              <span class="badge" title="{{ t.media_badge.label }}">{{ t.media_badge.icon }}</span>
             {% endif %}
+            <div class="text-muted" style="white-space:nowrap;">
+              {{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}
+            </div>
+          </div>
         </div>
+
+        <!-- Auteur toujours visible (utile surtout pour les textes partagés) -->
+        <div class="text-muted" style="margin-top:-4px;">par {{ t.created_by }}</div>
+
+        <!-- Bloc job YouTube (si présent) -->
         {% if t.yt_job_id %}
-        <div class="card subtle" data-job-id="{{ t.yt_job_id }}" style="margin-top:6px;">
+          <div class="card subtle" data-job-id="{{ t.yt_job_id }}" style="margin-top:6px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-                <div><strong>Extraction audio YouTube</strong></div>
-                {% if current_user.is_admin %}
+              <div><strong>Extraction audio YouTube</strong></div>
+              {% if current_user.is_admin %}
                 <div class="inline-actions">
-                    <button class="button small danger btn-cancel">Annuler</button>
-                    <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
+                  <button class="button small danger btn-cancel">Annuler</button>
+                  <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
                 </div>
-                {% endif %}
+              {% endif %}
             </div>
-            <div class="progress" style="margin-top:6px;">
-                <div class="progress-bar" style="width:0%"></div>
-            </div>
+            <div class="progress" style="margin-top:6px;"><div class="progress-bar" style="width:0%"></div></div>
             <div class="text-muted job-msg" style="margin-top:6px;">Préparation…</div>
-        </div>
+          </div>
         {% endif %}
 
+        <!-- Image -->
         {% if t.image_filename %}
-        <img alt="" src="{{ url_for('core.uploaded_file', filename=t.image_filename) }}"
-             style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
+          <img alt="" src="{{ url_for('core.uploaded_file', filename=t.image_filename) }}"
+               style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
         {% elif t.image_url %}
-        <img alt="" src="{{ t.image_url }}" style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
+          <img alt="" src="{{ t.image_url }}"
+               style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
         {% endif %}
 
+        <!-- Contexte (legacy) -->
         {% if t.context %}
-        <div class="text-muted" style="font-style:italic;">{{ t.context }}</div>
+          <div class="text-muted" style="font-style:italic;">{{ t.context }}</div>
         {% endif %}
 
-        <p style="margin:0; white-space:pre-wrap; line-height:1.5; max-height:7.2em; overflow:hidden;">
-            {{ (t.body or '')[:300] }}{% if (t.body or '')|length > 300 %}…{% endif %}
-        </p>
+        <!-- Aperçu : si body legacy existe on le tronque, sinon message chiffré -->
+        {% if t.body %}
+          <p style="margin:0; white-space:pre-wrap; line-height:1.5; max-height:7.2em; overflow:hidden;">
+            {{ t.body[:300] }}{% if t.body|length > 300 %}…{% endif %}
+          </p>
+        {% else %}
+          <p class="text-muted" style="margin:0;">
+            Contenu chiffré — ouvrir pour lire.
+          </p>
+        {% endif %}
 
-        <div style="display:flex; gap:8px; margin-top:auto; flex-wrap:wrap;">
-            <a class="button" href="{{ url_for('texts.view_text', text_id=t.id) }}">Ouvrir</a>
-            {% if current_user.is_admin %}
+        <!-- Actions -->
+        <div style="display:flex; gap:8px; margin-top:auto; flex-wrap:wrap; align-items:center;">
+          <a class="button" href="{{ url_for('texts.view_text', text_id=t.id) }}">Ouvrir</a>
+
+          {% set is_owner = (t.created_by is defined and t.created_by == current_user.get_id()) %}
+          {% if current_user.is_admin or is_owner %}
             <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=t.id) }}">Modifier</a>
-            {% endif %}
+            <form method="post" action="{{ url_for('texts.delete_text', text_id=t.id) }}"
+                  onsubmit="return confirm('Supprimer ce texte ?');" style="margin:0;">
+              <button class="button danger" type="submit">Supprimer</button>
+            </form>
+          {% endif %}
         </div>
-    </article>
+
+      </article>
     {% endfor %}
-</div>
+  </div>
 {% endif %}
+
 <script>
-    (function(){
-      const cards = document.querySelectorAll('[data-job-id]');
-      if(!cards.length) return;
+(function(){
+  const cards = document.querySelectorAll('[data-job-id]');
+  if(!cards.length) return;
 
-      async function pollOne(card){
-        const id = card.getAttribute('data-job-id');
-        const bar = card.querySelector('.progress-bar');
-        const msg = card.querySelector('.job-msg');
-        const btnCancel = card.querySelector('.btn-cancel');
-        const btnRetry = card.querySelector('.btn-retry');
+  async function pollOne(card){
+    const id = card.getAttribute('data-job-id');
+    const bar = card.querySelector('.progress-bar');
+    const msg = card.querySelector('.job-msg');
+    const btnCancel = card.querySelector('.btn-cancel');
+    const btnRetry  = card.querySelector('.btn-retry');
 
-        try{
-          const r = await fetch("/jobs/"+id+"/status");
-          if(!r.ok){ msg.textContent = "Job inconnu."; return; }
-          const j = await r.json();
-          bar.style.width = (j.progress||0)+"%";
-          msg.textContent = (j.state||"") + (j.message ? " — "+j.message : "");
+    try{
+      const r = await fetch("/jobs/"+id+"/status");
+      if(!r.ok){ msg.textContent = "Job inconnu."; return; }
+      const j = await r.json();
+      if(bar) bar.style.width = (j.progress||0)+"%";
+      if(msg) msg.textContent = (j.state||"") + (j.message ? " — "+j.message : "");
 
-          if(j.state === "done"){
-            // recharge pour que la carte passe en "Audio local"
-            location.reload(); return;
-          }
-          if(j.state === "error"){
-            if(btnRetry) btnRetry.style.display = 'inline-block';
-            if(btnCancel) btnCancel.disabled = true;
-            return;
-          }
-          if(j.state === "cancelled"){
-            msg.textContent = "Annulé";
-            if(btnRetry) btnRetry.style.display = 'inline-block';
-            return;
-          }
+      if(j.state === "done"){ location.reload(); return; }
+      if(j.state === "error"){ if(btnRetry) btnRetry.style.display = 'inline-block'; if(btnCancel) btnCancel.disabled = true; return; }
+      if(j.state === "cancelled"){ if(msg) msg.textContent = "Annulé"; if(btnRetry) btnRetry.style.display = 'inline-block'; return; }
 
-          setTimeout(()=>pollOne(card), 1000);
-        }catch(e){
-          setTimeout(()=>pollOne(card), 2000);
-        }
+      setTimeout(()=>pollOne(card), 1000);
+    }catch(e){
+      setTimeout(()=>pollOne(card), 2000);
+    }
 
-        {% if current_user.is_admin %}
-        if(btnCancel && !btnCancel._bound){
-          btnCancel._bound = true;
-          btnCancel.addEventListener('click', async ()=>{
-            btnCancel.disabled = true;
-            await fetch("/jobs/"+id+"/cancel", {method:"POST"});
-            setTimeout(()=>pollOne(card), 300);
-          });
-        }
-        if(btnRetry && !btnRetry._bound){
-          btnRetry._bound = true;
-          btnRetry.addEventListener('click', async ()=>{
-            btnRetry.disabled = true;
-            const r = await fetch("/jobs/"+id+"/retry", {method:"POST"});
-            if(r.ok) location.reload(); else btnRetry.disabled = false;
-          });
-        }
-        {% endif %}
-      }
+    {% if current_user.is_admin %}
+    if(btnCancel && !btnCancel._bound){
+      btnCancel._bound = true;
+      btnCancel.addEventListener('click', async ()=>{
+        btnCancel.disabled = true;
+        await fetch("/jobs/"+id+"/cancel", {method:"POST"});
+        setTimeout(()=>pollOne(card), 300);
+      });
+    }
+    if(btnRetry && !btnRetry._bound){
+      btnRetry._bound = true;
+      btnRetry.addEventListener('click', async ()=>{
+        btnRetry.disabled = true;
+        const r = await fetch("/jobs/"+id+"/retry", {method:"POST"});
+        if(r.ok) location.reload(); else btnRetry.disabled = false;
+      });
+    }
+    {% endif %}
+  }
 
-      cards.forEach(pollOne);
-    })();
+  cards.forEach(pollOne);
+})();
 </script>
 {% endblock %}

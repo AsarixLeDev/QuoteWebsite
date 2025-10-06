@@ -2,22 +2,23 @@ from __future__ import annotations
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from sqlalchemy import String, Text as SAText, Boolean, DateTime, ForeignKey, Table, select
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from storage import get_conf, read_db  # on garde la config JSON
 
 # ---------- SQLAlchemy setup ----------
-class Base(DeclarativeBase): pass
+class Base(DeclarativeBase):
+    pass
 
 def _db_url() -> str:
     conf = get_conf(read_db())
     url = (conf.get("database") or {}).get("url")
     # Par défaut: ./data/pastelnotes.db
     if not url:
-        # s'assurer que ./data existe
         os.makedirs(os.path.join(os.getcwd(), "data"), exist_ok=True)
         url = "sqlite:///./data/pastelnotes.db"
     # si sqlite relative, créer le dossier ciblé si besoin
@@ -26,7 +27,8 @@ def _db_url() -> str:
         d = os.path.dirname(path)
         if d and not os.path.isabs(d):
             d = os.path.join(os.getcwd(), d)
-        if d: os.makedirs(d, exist_ok=True)
+        if d:
+            os.makedirs(d, exist_ok=True)
     return url
 
 engine = sa.create_engine(_db_url(), future=True, pool_pre_ping=True)
@@ -47,28 +49,46 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # Nouveau
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    encrypted_user_key: Mapped[Optional[str]] = mapped_column(SAText, nullable=True)
+
     texts_created = relationship("Text", back_populates="created_by_user")
     texts_allowed = relationship("Text", secondary=text_access, back_populates="allowed_users")
 
 class Text(Base):
     __tablename__ = "texts"
     id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[Optional[str]] = mapped_column(String(255))
-    body: Mapped[str] = mapped_column(SAText)
-    context: Mapped[Optional[str]] = mapped_column(SAText)
+
+    # (legacy) champs clairs — on les laisse nullable pour migration, on évite de les remplir en v2
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    body: Mapped[Optional[str]] = mapped_column(SAText, nullable=True)
+    context: Mapped[Optional[str]] = mapped_column(SAText, nullable=True)
+
+    # méta non sensibles
     music_url: Mapped[Optional[str]] = mapped_column(String(512))
     music_original_url: Mapped[Optional[str]] = mapped_column(String(512))
     image_filename: Mapped[Optional[str]] = mapped_column(String(512))
     image_url: Mapped[Optional[str]] = mapped_column(String(512))
     image_original_url: Mapped[Optional[str]] = mapped_column(String(512))
+
+    # dates
     date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # auteur
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="texts_created")
 
+    # permissions
     allowed_users = relationship("User", secondary=text_access, back_populates="texts_allowed")
+
+    # chiffrement v2
+    default_allow: Mapped[bool] = mapped_column(Boolean, default=False)
+    cipher_alg:    Mapped[Optional[str]] = mapped_column(String(64))
+    ciphertext:    Mapped[Optional[str]] = mapped_column(SAText)
+    cipher_nonce:  Mapped[Optional[str]] = mapped_column(String(24))
 
 class SpotifyToken(Base):
     __tablename__ = "spotify_tokens"
@@ -77,16 +97,33 @@ class SpotifyToken(Base):
     refresh_token: Mapped[Optional[str]] = mapped_column(SAText)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
+class FriendRequest(Base):
+    __tablename__ = "friend_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    to_user_id:   Mapped[int] = mapped_column(ForeignKey("users.id"))
+    status:       Mapped[str] = mapped_column(String(16), default="pending")  # 'pending','accepted','declined','cancelled'
+    created_at:   Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    responded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+class Friend(Base):
+    __tablename__ = "friends"
+    user_id:        Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    friend_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    created_at:     Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
-# ---------- Helpers ----------
-def _pepper() -> str: return (get_conf(read_db()).get("password_pepper") or "")
+# ---------- Helpers (users) ----------
+def _pepper() -> str:
+    return (get_conf(read_db()).get("password_pepper") or "")
 
 def get_user(username: str) -> Optional[Dict[str, Any]]:
     with SessionLocal() as s:
-        u = s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
-        if not u: return None
+        u = s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower()))
+        if not u:
+            return None
         return {"username": u.username, "is_admin": u.is_admin, "created_at": u.created_at.isoformat()}
 
 def list_users() -> List[Dict[str, Any]]:
@@ -96,111 +133,187 @@ def list_users() -> List[Dict[str, Any]]:
 
 def add_user(username: str, password: str, is_admin: bool=False) -> None:
     with SessionLocal.begin() as s:
-        if s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower())):
+        if s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower())):
             raise ValueError("username already exists")
-        u = User(username=username.strip(), password_hash=generate_password_hash(password+_pepper()), is_admin=is_admin)
+        u = User(username=username.strip(),
+                 password_hash=generate_password_hash(password + _pepper()),
+                 is_admin=is_admin)
         s.add(u)
 
 def set_user_password(username: str, password: str) -> None:
     with SessionLocal.begin() as s:
-        u = s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
-        if not u: raise ValueError("user not found")
-        u.password_hash = generate_password_hash(password+_pepper())
+        u = s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower()))
+        if not u:
+            raise ValueError("user not found")
+        u.password_hash = generate_password_hash(password + _pepper())
 
 def check_user_password(username: str, password: str) -> bool:
     with SessionLocal() as s:
-        u = s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
-        return bool(u and check_password_hash(u.password_hash, password+_pepper()))
+        u = s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower()))
+        return bool(u and check_password_hash(u.password_hash, password + _pepper()))
 
 def admin_username() -> str:
-    return (get_conf(read_db()).get("admin") or {}).get("username","admin")
+    return (get_conf(read_db()).get("admin") or {}).get("username", "admin")
 
 def check_admin_password(username: str, password: str) -> bool:
     if username.strip().lower() != admin_username().lower():
         return False
     return check_user_password(username, password)
 
-# --- Texts ---
+# ---------- Helpers (texts) ----------
 def list_texts_for_user(username: str, is_admin: bool) -> List[Dict[str, Any]]:
     with SessionLocal() as s:
         if is_admin:
             rows = s.scalars(select(Text).order_by(Text.date.desc())).all()
         else:
-            u = s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
+            u = s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower()))
             if not u: return []
-            rows = list(u.texts_allowed)
-            rows.sort(key=lambda t: t.date, reverse=True)
-        out=[]
+            own = list(s.scalars(select(Text).where(Text.created_by_id == u.id)).all())
+            shared = list(u.texts_allowed)
+            rows = {t.id: t for t in own + shared}.values()  # dédoublonne
+            rows = sorted(rows, key=lambda t: t.date, reverse=True)
+        out = []
         for t in rows:
+            # On ne renvoie pas le plaintext; on inclut seulement méta + auteur
             out.append({
-                "id": t.id, "title": t.title, "body": t.body, "context": t.context,
-                "music_url": t.music_url, "image_filename": t.image_filename, "image_url": t.image_url,
-                "date_dt": t.date, "date": t.date.isoformat(),
+                "id": t.id,
+                "date_dt": t.date,
+                "date": t.date.isoformat(),
                 "created_by": t.created_by_user.username,
                 "allowed_usernames": [u.username for u in t.allowed_users],
+                # Legacy support (si des textes anciens ont encore title):
+                "title": t.title,
+                "image_filename": t.image_filename,
+                "image_url": t.image_url,
+                "music_url": t.music_url,
             })
         return out
 
 def get_text_dict(text_id: int) -> Optional[Dict[str, Any]]:
     with SessionLocal() as s:
         t = s.get(Text, text_id)
-        if not t: return None
+        if not t:
+            return None
         return {
-            "id": t.id, "title": t.title, "body": t.body, "context": t.context,
-            "music_url": t.music_url, "music_original_url": t.music_original_url,
-            "image_filename": t.image_filename, "image_url": t.image_url,
-            "image_original_url": t.image_original_url,
-            "date": t.date.isoformat(), "created_at": t.created_at.isoformat(), "updated_at": t.updated_at.isoformat(),
+            "id": t.id,
+            "date": t.date.isoformat(),
+            "created_at": t.created_at.isoformat(),
+            "updated_at": t.updated_at.isoformat(),
             "created_by": t.created_by_user.username,
+
+            # champs chiffrés
+            "cipher_alg": t.cipher_alg,
+            "ciphertext": t.ciphertext,
+            "cipher_nonce": t.cipher_nonce,
+
+            # méta non sensibles
+            "music_url": t.music_url,
+            "music_original_url": t.music_original_url,
+            "image_filename": t.image_filename,
+            "image_url": t.image_url,
+            "image_original_url": t.image_original_url,
+
+            # permissions
             "allowed_usernames": [u.username for u in t.allowed_users],
+
+            # legacy (pour compat si nécessaire)
+            "title": t.title,
+            "body": t.body,
+            "context": t.context,
+            "default_allow": t.default_allow,
         }
 
 def create_text(created_by_username: str, data: Dict[str, Any], allowed_usernames: List[str]) -> int:
+    """
+    data attend au minimum:
+      - cipher_alg, ciphertext, cipher_nonce
+      - date_dt (datetime) optionnel
+      - default_allow (bool) optionnel
+      - meta: music_url, music_original_url, image_filename, image_url, image_original_url
+    """
     with SessionLocal.begin() as s:
-        owner = s.scalar(select(User).where(sa.func.lower(User.username)==created_by_username.strip().lower()))
-        if not owner: raise ValueError("creator not found")
+        owner = s.scalar(select(User).where(sa.func.lower(User.username) == created_by_username.strip().lower()))
+        if not owner:
+            raise ValueError("creator not found")
         t = Text(
-            title=data.get("title"),
-            body=str(data.get("body") or ""),               # toujours string
-            context=data.get("context"),
+            # ⚠️ legacy: on remplit un vide pour respecter NOT NULL existant
+            title=None, body="", context=None,
+
+            # chiffrement v2
+            cipher_alg=data.get("cipher_alg"),
+            ciphertext=data.get("ciphertext"),
+            cipher_nonce=data.get("cipher_nonce"),
+            default_allow=bool(data.get("default_allow") or False),
+
+            # méta
             music_url=data.get("music_url"),
             music_original_url=data.get("music_original_url"),
             image_filename=data.get("image_filename"),
             image_url=data.get("image_url"),
             image_original_url=data.get("image_original_url"),
+
             date=data.get("date_dt") or datetime.utcnow(),
             created_by_user=owner,
         )
+        s.add(t);
+        s.flush()  # <<< ajoute/flush avant d'attacher les permissions
         if allowed_usernames:
-            allow = s.scalars(select(User).where(sa.func.lower(User.username).in_([u.strip().lower() for u in allowed_usernames]))).all()
+            allow = s.scalars(select(User).where(sa.func.lower(User.username)
+                                                 .in_([u.strip().lower() for u in allowed_usernames]))).all()
             t.allowed_users = list(allow)
-        s.add(t); s.flush()
+        s.add(t)
+        s.flush()
         return t.id
 
 def update_text(text_id: int, data: Dict[str, Any], allowed_usernames: List[str] | None) -> None:
     with SessionLocal.begin() as s:
         t = s.get(Text, text_id)
-        if not t: raise ValueError("text not found")
-        # champs libres
-        for k in ["title","context","music_url","music_original_url","image_filename","image_url","image_original_url"]:
-            if k in data: setattr(t, k, data.get(k))
-        if "body" in data: t.body = str(data.get("body") or "")
-        if "date_dt" in data and data["date_dt"]: t.date = data["date_dt"]
+        if not t:
+            raise ValueError("text not found")
+
+        # MAJ champs chiffrés / flag
+        for k in ["cipher_alg", "ciphertext", "cipher_nonce", "default_allow"]:
+            if k in data:
+                setattr(t, k, data.get(k))
+
+        # MAJ méta
+        for k in ["music_url", "music_original_url", "image_filename", "image_url", "image_original_url"]:
+            if k in data:
+                setattr(t, k, data.get(k))
+
+        # date si fournie
+        if "date_dt" in data and data["date_dt"]:
+            t.date = data["date_dt"]
+
+        # permissions si demande explicite
         if allowed_usernames is not None:
-            allow = s.scalars(select(User).where(sa.func.lower(User.username).in_([u.strip().lower() for u in allowed_usernames]))).all()
+            allow = s.scalars(
+                select(User).where(sa.func.lower(User.username).in_([u.strip().lower() for u in allowed_usernames]))
+            ).all()
             t.allowed_users = list(allow)
 
-# --- Migration depuis JSON ---
-def _parse_dt(v) -> Optional[datetime]:
-    if not v: return None
-    try: return datetime.fromisoformat(v.replace("Z","+00:00").replace(" ","T"))
-    except Exception: return None
+def delete_text(text_id: int) -> bool:
+    with SessionLocal.begin() as s:
+        t = s.get(Text, text_id)
+        if not t:
+            return False
+        s.delete(t)
+        return True
 
-def migrate_json_to_sql() -> Dict[str,int]:
+# ---------- Migration depuis JSON (legacy) ----------
+def _parse_dt(v) -> Optional[datetime]:
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(v.replace("Z", "+00:00").replace(" ", "T"))
+    except Exception:
+        return None
+
+def migrate_json_to_sql() -> Dict[str, int]:
     """
     Lit data.json et insère users/texts si absents.
     - Dates parsées en datetime.
-    - body toujours casté en str pour éviter les objets inattendus.
+    - Les anciens champs clairs sont copiés (pour compat), mais V2 n'en crée plus de nouveaux.
     """
     from storage import read_db as _read
     db = _read()
@@ -209,43 +322,45 @@ def migrate_json_to_sql() -> Dict[str,int]:
         # users
         for u in db.get("users", []):
             uname = (u.get("username") or "").strip()
-            if not uname: continue
-            existing = s.scalar(select(User).where(sa.func.lower(User.username)==uname.lower()))
-            if existing: continue
+            if not uname:
+                continue
+            existing = s.scalar(select(User).where(sa.func.lower(User.username) == uname.lower()))
+            if existing:
+                continue
             nu = User(username=uname,
                       password_hash=u.get("password_hash") or "",
                       is_admin=bool(u.get("is_admin")))
-            s.add(nu); added_u += 1
+            s.add(nu)
+            added_u += 1
         # ensure admin
-        adm = (db.get("config",{}).get("admin",{}) or {}).get("username") or "admin"
-        adm_u = s.scalar(select(User).where(sa.func.lower(User.username)==adm.lower()))
+        adm = (db.get("config", {}).get("admin", {}) or {}).get("username") or "admin"
+        adm_u = s.scalar(select(User).where(sa.func.lower(User.username) == adm.lower()))
         if not adm_u:
-            s.add(User(username=adm, password_hash="", is_admin=True)); added_u += 1
+            s.add(User(username=adm, password_hash="", is_admin=True))
+            added_u += 1
         s.flush()
 
-        # texts
+        # texts (legacy clair -> vers colonnes legacy ; les nouveaux iront en chiffré)
         for t in db.get("texts", []):
             title = t.get("title")
-            body  = str(t.get("body") or "")
-            dt    = _parse_dt(t.get("date")) or datetime.utcnow()
+            body = (t.get("body") or "")
+            dt = _parse_dt(t.get("date")) or datetime.utcnow()
             creator_name = t.get("created_by")
-            creator = s.scalar(select(User).where(User.username==creator_name))
-            if not creator: continue
+            creator = s.scalar(select(User).where(User.username == creator_name))
+            if not creator:
+                continue
 
-            # existe déjà ? (title/body/date/creator)
-            q = select(Text.id).where(Text.body==body, Text.created_by_id==creator.id)
+            q = select(Text.id).where(Text.created_by_id == creator.id, Text.date == dt)
             if title is None:
                 q = q.where(Text.title.is_(None))
             else:
-                q = q.where(Text.title==title)
-            if dt:
-                q = q.where(Text.date==dt)
+                q = q.where(Text.title == title)
             exists_id = s.scalar(q.limit(1))
             if exists_id:
                 continue
 
             nt = Text(
-                title=title, body=body, context=t.get("context"),
+                title=title, body=str(body), context=t.get("context"),
                 music_url=t.get("music_url"), music_original_url=t.get("music_original_url"),
                 image_filename=t.get("image_filename"), image_url=t.get("image_url"),
                 image_original_url=t.get("image_original_url"),
@@ -258,5 +373,129 @@ def migrate_json_to_sql() -> Dict[str,int]:
             if allow:
                 allow_rows = s.scalars(select(User).where(sa.func.lower(User.username).in_([x.lower() for x in allow]))).all()
                 nt.allowed_users = list(allow_rows)
-            s.add(nt); added_t += 1
+            s.add(nt)
+            added_t += 1
     return {"users_added": added_u, "texts_added": added_t}
+
+def _get_user_by_name(s, username:str) -> Optional[User]:
+    return s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
+
+def list_friendship(username:str) -> Dict[str, list]:
+    with SessionLocal() as s:
+        u = _get_user_by_name(s, username);
+        if not u:
+            return {"accepted":[], "pending_out":[], "pending_in":[]}
+        # accepted
+        rows = s.scalars(select(Friend).where(Friend.user_id==u.id)).all()
+        accepted = []
+        for f in rows:
+            fri = s.get(User, f.friend_user_id)
+            if fri: accepted.append(fri.username)
+        # pending out / in
+        po = s.scalars(select(FriendRequest).where(FriendRequest.from_user_id==u.id, FriendRequest.status=="pending")).all()
+        pending_out = [s.get(User, r.to_user_id).username for r in po if s.get(User, r.to_user_id)]
+        pi = s.scalars(select(FriendRequest).where(FriendRequest.to_user_id==u.id, FriendRequest.status=="pending")).all()
+        pending_in = [s.get(User, r.from_user_id).username for r in pi if s.get(User, r.from_user_id)]
+        return {"accepted":accepted, "pending_out":pending_out, "pending_in":pending_in}
+
+def send_friend_request(from_username:str, to_username:str) -> None:
+    if from_username.strip().lower() == to_username.strip().lower():
+        raise ValueError("Impossible de s'ajouter soi-même.")
+    with SessionLocal.begin() as s:
+        a = _get_user_by_name(s, from_username); b = _get_user_by_name(s, to_username)
+        if not a or not b: raise ValueError("Utilisateur introuvable.")
+        # déjà amis ?
+        if s.get(Friend, {"user_id":a.id,"friend_user_id":b.id}):
+            return
+        # pending existant ?
+        exists = s.scalar(select(FriendRequest).where(FriendRequest.from_user_id==a.id,
+                                                     FriendRequest.to_user_id==b.id,
+                                                     FriendRequest.status=="pending"))
+        if exists: return
+        # s'il y a une demande inverse en pending, on accepte directement
+        inverse = s.scalar(select(FriendRequest).where(FriendRequest.from_user_id==b.id,
+                                                       FriendRequest.to_user_id==a.id,
+                                                       FriendRequest.status=="pending"))
+        if inverse:
+            inverse.status="accepted"; inverse.responded_at=datetime.utcnow()
+            _add_mutual_friendship(s, a, b)
+            _propagate_default_allow(s, author=a, new_friend=b)
+            _propagate_default_allow(s, author=b, new_friend=a)
+            return
+        fr = FriendRequest(from_user_id=a.id, to_user_id=b.id, status="pending")
+        s.add(fr)
+
+def cancel_friend_request(from_username:str, to_username:str) -> None:
+    with SessionLocal.begin() as s:
+        a = _get_user_by_name(s, from_username); b = _get_user_by_name(s, to_username)
+        if not a or not b: return
+        fr = s.scalar(select(FriendRequest).where(FriendRequest.from_user_id==a.id,
+                                                  FriendRequest.to_user_id==b.id,
+                                                  FriendRequest.status=="pending"))
+        if fr:
+            fr.status = "cancelled"; fr.responded_at = datetime.utcnow()
+
+def _add_mutual_friendship(s, a:User, b:User):
+    if not s.get(Friend, {"user_id":a.id,"friend_user_id":b.id}):
+        s.add(Friend(user_id=a.id, friend_user_id=b.id))
+    if not s.get(Friend, {"user_id":b.id,"friend_user_id":a.id}):
+        s.add(Friend(user_id=b.id, friend_user_id=a.id))
+
+def _propagate_default_allow(s, author:User, new_friend:User):
+    ids = [t.id for t in s.scalars(select(Text).where(Text.created_by_id==author.id, Text.default_allow==True)).all()]
+    for tid in ids:
+        exists = s.execute(sa.select(text_access.c.text_id)
+                           .where(text_access.c.text_id==tid, text_access.c.user_id==new_friend.id)).first()
+        if not exists:
+            s.execute(sa.insert(text_access).values(text_id=tid, user_id=new_friend.id))
+
+def respond_friend_request(me_username:str, other_username:str, accept:bool) -> None:
+    with SessionLocal.begin() as s:
+        me    = _get_user_by_name(s, me_username)
+        other = _get_user_by_name(s, other_username)
+        if not me or not other: raise ValueError("Utilisateur introuvable.")
+        fr = s.scalar(select(FriendRequest).where(FriendRequest.to_user_id==me.id,
+                                                  FriendRequest.from_user_id==other.id,
+                                                  FriendRequest.status=="pending"))
+        if not fr: return
+        fr.status      = "accepted" if accept else "declined"
+        fr.responded_at = datetime.utcnow()
+        if accept:
+            _add_mutual_friendship(s, me, other)
+            _propagate_default_allow(s, author=other, new_friend=me)
+            _propagate_default_allow(s, author=me,    new_friend=other)
+
+def remove_friend(me_username:str, other_username:str) -> None:
+    with SessionLocal.begin() as s:
+        me    = _get_user_by_name(s, me_username)
+        other = _get_user_by_name(s, other_username)
+        if not me or not other: return
+        s.execute(sa.delete(Friend).where(Friend.user_id==me.id, Friend.friend_user_id==other.id))
+        s.execute(sa.delete(Friend).where(Friend.user_id==other.id, Friend.friend_user_id==me.id))
+
+def list_texts_visible_to(viewer_username:str, author_username:str) -> List[Text]:
+    """Textes de author visibles par viewer (auteur ou dans text_access)."""
+    with SessionLocal() as s:
+        viewer = _get_user_by_name(s, viewer_username)
+        author = _get_user_by_name(s, author_username)
+        if not viewer or not author: return []
+        if viewer.id == author.id:
+            q = select(Text).where(Text.created_by_id==author.id)
+        else:
+            # author → textes dont text_access contient viewer
+            q = select(Text).join(text_access, text_access.c.text_id==Text.id) \
+                            .where(Text.created_by_id==author.id, text_access.c.user_id==viewer.id)
+        rows = s.scalars(q.order_by(Text.date.desc())).all()
+        return rows
+
+# Exports utiles à d'autres modules
+__all__ = [
+    "sa", "select", "SessionLocal", "init_db",
+    "User", "Text", "SpotifyToken", "text_access",
+    "get_user", "list_users", "add_user", "set_user_password",
+    "check_user_password", "admin_username", "check_admin_password",
+    "list_texts_for_user", "get_text_dict", "create_text", "update_text", "delete_text",
+    "Friend","FriendRequest",
+    "list_friendship","send_friend_request","cancel_friend_request","respond_friend_request","remove_friend",
+    "list_texts_visible_to",
+]

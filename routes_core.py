@@ -22,7 +22,8 @@ from storage import (
     ensure_unique_usernames
 )
 
-import storage_sql as store
+import crypto_server as cserv  # <-- ajouter
+import storage_sql as store    # si pas déjà importé
 
 core_bp = Blueprint("core", __name__)
 
@@ -125,6 +126,30 @@ def _import_assets_from_zip(zf: zipfile.ZipFile, arcpath: str) -> Optional[str]:
 AUDIO_EXTS = {"mp3", "m4a", "aac", "ogg", "wav", "webm", "opus"}
 
 
+# Indicateur "média extérieur" pour le dashboard
+def _media_badge(music_url: str | None):
+    if not music_url:
+        return None
+    u = music_url.strip().lower()
+    if u.startswith("/uploads/"):   # fichier local => pas d'indicateur
+        return None
+    if "youtube.com" in u or "youtu.be" in u:
+        return {"icon": "▶️", "label": "YouTube"}
+    if "open.spotify.com" in u:
+        return {"icon": "🟢", "label": "Spotify"}
+    if "soundcloud.com" in u:
+        return {"icon": "☁️", "label": "SoundCloud"}
+    if "deezer.com" in u or "link.deezer.com" in u:
+        return {"icon": "🔷", "label": "Deezer"}
+    if "music.apple.com" in u or "embed.music.apple.com" in u:
+        return {"icon": "🍎", "label": "Apple Music"}
+    # audio direct http(s)
+    if u.startswith("http") and any(u.endswith("."+ext) for ext in ["mp3","m4a","aac","ogg","wav","opus"]):
+        return {"icon": "🎵", "label": "Audio"}
+    return {"icon": "🌐", "label": "Lien"}
+
+
+
 def _media_badge_for_text(t):
     url = (t.get("music_url") or t.get("music_original_url") or "").lower()
     mode = (t.get("youtube_mode") or "").lower()
@@ -165,11 +190,22 @@ def inject_globals():
     except Exception:
         spotify_connected = False
 
+    # <- ajoute ce bloc
+    pending = 0
+    if getattr(current_user, "is_authenticated", False):
+        try:
+            fr = store.list_friendship(current_user.get_id())
+            pending = len(fr.get("pending_in", []))
+        except Exception:
+            pending = 0
+    # ->
+
     return {
         "now": datetime.utcnow,
         "site_name": conf.get("site_name", "Pastel Notes"),
         "has_spotify": has_spotify,
-        "spotify_connected": spotify_connected
+        "spotify_connected": spotify_connected,
+        "friend_pending_count": pending,  # <--- nouveau
     }
 
 
@@ -223,11 +259,58 @@ def logout_view():
 # ------------------- Dashboard -------------------
 
 @core_bp.route("/dashboard")
+# --- fonction dashboard : remplacer entièrement ---
 @login_required
 def dashboard():
-    is_admin = getattr(current_user, "is_admin", False)
-    texts = store.list_texts_for_user(current_user.get_id(), is_admin)
-    return render_template("dashboard.html", texts=texts)
+    try:
+        is_admin = getattr(current_user, "is_admin", False)
+        rows = store.list_texts_for_user(current_user.get_id(), is_admin)
+
+        vms = []
+        for r in rows:
+            full = store.get_text_dict(r["id"]) or {}
+            title = r.get("title"); body = None; context = None
+
+            if full.get("ciphertext") and full.get("cipher_nonce"):
+                try:
+                    clear = cserv.decrypt_text_payload(full["created_by"], full["ciphertext"], full["cipher_nonce"])
+                    title   = clear.get("title") or title
+                    body    = clear.get("body")
+                    context = clear.get("context")
+                except Exception:
+                    # fallback legacy si dispo
+                    title = (r.get("title") or title or "(indéchiffrable)")
+                    body = (r.get("body") or "(indéchiffrable)")
+                    context = r.get("context")
+            else:
+                body    = r.get("body")
+                context = r.get("context")
+
+            vm = {
+                "id": r["id"],
+                "date_dt": r["date_dt"],
+                "created_by": full.get("created_by", r.get("created_by")),
+                "title": title or "(sans titre)",
+                "body": body,
+                "context": context,
+                "image_filename": r.get("image_filename"),
+                "image_url": r.get("image_url"),
+                "music_url": r.get("music_url"),
+            }
+            mu = full.get("music_url") or r.get("music_url")
+            vm["media_badge"] = _media_badge(mu)
+            try:
+                yt = (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(r["id"]))
+                if yt: vm["yt_job_id"] = yt
+            except Exception:
+                pass
+            vms.append(vm)
+
+        vms.sort(key=lambda t: t["date_dt"], reverse=True)
+        return render_template("dashboard.html", texts=vms)
+    except Exception:
+        flash("Impossible d'afficher le tableau de bord.")
+        return render_template("dashboard.html", texts=[])
 
 
 # ------------------- Uploads (images/audio) -------------------
