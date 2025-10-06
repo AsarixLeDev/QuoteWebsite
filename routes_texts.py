@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import re
 import secrets
 import urllib.parse
@@ -12,18 +11,19 @@ from werkzeug.utils import secure_filename
 import jobs
 from paths import UPLOAD_DIR
 from storage import (
-    read_db, write_db, next_id, list_users,
-    get_spotify_token_record, get_conf
+    read_db, write_db, get_conf, get_spotify_token_record
 )
+import storage_sql as store  # ORM SQL
 
 ALLOWED_IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
 ALLOWED_AUDIO_EXTS = {"mp3", "ogg", "wav", "m4a", "aac"}
 
 texts_bp = Blueprint("texts", __name__)
 
-from storage import get_conf
-limits = (get_conf(read_db()).get("limits") or {})
-MAX_UPLOAD_MB = int(limits.get("upload_max_mb", 32))
+# Limite d'upload lue depuis la config JSON
+_limits = (get_conf(read_db()).get("limits") or {})
+MAX_UPLOAD_MB = int(_limits.get("upload_max_mb", 32))
+
 
 # ---------- Helpers upload ----------
 def _is_allowed(filename: str, allowed: set[str]) -> bool:
@@ -54,7 +54,7 @@ def _download_audio_from_url(url: str) -> str | None:
     """
     Télécharge un audio distant dans /uploads et renvoie le filename local, sinon None.
     - URL audio directe (.mp3/.m4a/...) : via requests
-    - YouTube & co. : via yt-dlp (ffmpeg recommandé)
+    - YouTube & co. : via yt-dlp (sans post-traitement si possible)
     """
     base = url.split("#", 1)[0].split("?", 1)[0]
     # Direct audio
@@ -79,22 +79,23 @@ def _download_audio_from_url(url: str) -> str | None:
     except Exception:
         return None
 
-    out_name = f"{secrets.token_urlsafe(16)}.m4a"
-    out_path = str(UPLOAD_DIR / out_name)
+    token = secrets.token_urlsafe(16)
+    out_tmpl = str(UPLOAD_DIR / (token + ".%(ext)s"))
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": out_path,
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "outtmpl": out_tmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "5"}
-        ],
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return out_name
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
+        import os
+        if not file_path or not os.path.exists(file_path):
+            return None
+        return os.path.basename(file_path)
     except Exception:
         return None
 
@@ -116,14 +117,13 @@ def _detect_embed(url: str | None) -> dict:
         if ext in ALLOWED_AUDIO_EXTS:
             return {"type": "audio_direct", "src": u}
 
-    # ---------------- Spotify (support /intl-xx/)
-    # ex: https://open.spotify.com/intl-fr/track/ID
+    # Spotify (support /intl-xx/)
     m = re.search(r"open\.spotify\.com/(?:intl-[a-z]{2}/)?(track|playlist|album)/([A-Za-z0-9]+)", u)
     if m:
         kind, sid = m.groups()
         return {"type": "spotify", "kind": kind, "id": sid, "src": f"https://open.spotify.com/embed/{kind}/{sid}"}
 
-    # ---------------- YouTube (watch, youtu.be, shorts)
+    # YouTube (watch, youtu.be, shorts)
     try:
         p = urllib.parse.urlparse(u if re.match(r"^https?://", u) else "https://" + u.lstrip("/"))
     except Exception:
@@ -145,12 +145,12 @@ def _detect_embed(url: str | None) -> dict:
         if vid:
             return {"type": "youtube", "id": vid, "src": f"https://www.youtube.com/embed/{vid}"}
 
-    # ---------------- SoundCloud
+    # SoundCloud
     if "soundcloud.com" in u:
         enc = urllib.parse.quote(u, safe="")
         return {"type": "soundcloud", "src": f"https://w.soundcloud.com/player/?url={enc}"}
 
-    # ---------------- Deezer
+    # Deezer
     # 1) Shortlink link.deezer.com → suivre la redirection
     if "link.deezer.com" in host:
         try:
@@ -171,14 +171,13 @@ def _detect_embed(url: str | None) -> dict:
             params = "autoplay=false" + ("" if kind == "track" else "&tracklist=true")
             return {"type": "deezer", "kind": kind, "id": did, "src": f"https://widget.deezer.com/widget/auto/{kind}/{did}?{params}"}
 
-    # ---------------- Apple Music
+    # Apple Music
     if "music.apple.com" in host:
         em = u.replace("music.apple.com", "embed.music.apple.com", 1)
         return {"type": "applemusic", "src": em}
 
     # fallback
     return {"type": "link", "src": u}
-
 
 
 def _is_youtube(url: str | None) -> bool:
@@ -197,28 +196,57 @@ def _is_youtube(url: str | None) -> bool:
         return False
 
 
+# ---------- Mapping job YouTube dans JSON (pour l'UI) ----------
+def _yt_map_set(text_id: int, job_id: str) -> None:
+    db = read_db()
+    j = db.setdefault("jobs", {}).setdefault("yt", {})
+    j[str(text_id)] = job_id
+    write_db(db)
+
+
+def _yt_map_get(text_id: int) -> str | None:
+    db = read_db()
+    return (db.get("jobs", {}).get("yt", {}) or {}).get(str(text_id))
+
+
+def _yt_map_find_text_id(job_id: str) -> int | None:
+    db = read_db()
+    m = db.get("jobs", {}).get("yt", {}) or {}
+    for k, v in m.items():
+        if v == job_id:
+            try:
+                return int(k)
+            except Exception:
+                return None
+    return None
+
+
 # ---------- Routes ----------
 @texts_bp.route("/texts/<int:text_id>")
 @login_required
 def view_text(text_id: int):
-    db = read_db()
-    t = next((x for x in db.get("texts", []) if int(x["id"]) == text_id), None)
+    # Récupère depuis SQL
+    t = store.get_text_dict(text_id)
     if not t:
         from flask import abort
         abort(404)
+
+    # Permissions
     if not getattr(current_user, "is_admin", False):
-        if current_user.get_id() not in t.get("allowed_usernames", []):
+        if current_user.get_id() not in (t.get("allowed_usernames") or []):
             from flask import abort
             abort(403)
 
-    vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
-    # Détecte sur music_url OU music_original_url (utile pour YouTube en mode audio)
+    # VM
+    vm = dict(t)
+    vm["date_dt"] = datetime.fromisoformat(t["date"]) if t.get("date") else datetime.utcnow()
     vm["embed"] = _detect_embed(t.get("music_url") or t.get("music_original_url"))
+    vm["yt_job_id"] = _yt_map_get(text_id)
 
-    # --- Spotify : si non connecté, fournir meta + alternatives
+    # Spotify: si non connecté, meta + alternatives
     if vm["embed"].get("type") == "spotify":
         from spotify_utils import fetch_track_meta, build_alt_links
-        is_connected = bool(get_spotify_token_record(db, current_user.get_id()))
+        is_connected = bool(get_spotify_token_record(read_db(), current_user.get_id()))
         vm["spotify_connected"] = is_connected
         if not is_connected and vm["embed"].get("kind") == "track":
             meta = fetch_track_meta(vm["embed"].get("id"))
@@ -235,21 +263,23 @@ def new_text():
     if not getattr(current_user, "is_admin", False):
         from flask import abort
         abort(403)
-    db = read_db()
-    admin_name = (get_conf(db).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in list_users(db) if u["username"].strip().lower() != admin_name.strip().lower()]
+
+    # Liste des users (exclure l'admin du choix)
+    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
+    usernames = [u["username"] for u in store.list_users() if u["username"].strip().lower() != admin_name.strip().lower()]
+
     if request.method == "POST":
+        # limite métier
         if request.content_length and request.content_length > MAX_UPLOAD_MB * 1024 * 1024:
             flash(f"Fichier trop volumineux (> {MAX_UPLOAD_MB} Mo).")
-            return render_template("text_form.html",is_new=True,users = usernames,text =None)
-        title = _clean_opt(request.form.get("title"))
-        body = request.form.get("body")  # requis, pas de clean ici
-        context_val = _clean_opt(request.form.get("context"))
+            return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
+        title = _clean_opt(request.form.get("title"))
+        body = request.form.get("body")
+        context_val = _clean_opt(request.form.get("context"))
         music_url = _clean_opt(request.form.get("music_url"))
         image_remote_url = _clean_opt(request.form.get("image_url"))
         youtube_audio = (request.form.get("youtube_audio") == "1")
-
         date_str = (request.form.get("date") or "").strip()
         allowed = request.form.getlist("allowed_users")
 
@@ -270,7 +300,7 @@ def new_text():
         img_fs = request.files.get("image_file")
         img_name = _save_upload(img_fs, ALLOWED_IMAGE_EXTS) if img_fs and img_fs.filename else None
 
-        # Musique : upload prioritaire
+        # Musique
         mus_fs = request.files.get("music_file")
         music_original_url = None
         youtube_mode = None
@@ -280,34 +310,33 @@ def new_text():
         elif music_url and _is_youtube(music_url) and youtube_audio:
             music_original_url = music_url
             youtube_mode = "audio"
-            music_url = None  # sera rempli par le job
+            music_url = None  # sera rempli à la fin du job
         elif music_url and _is_youtube(music_url):
             youtube_mode = "video"
 
-        t = {
-            "id": next_id(db, "text"),
-            "title": title,
-            "body": body,
-            "context": context_val,
-            "music_url": music_url,
-            "music_original_url": music_original_url,
-            "youtube_mode": youtube_mode,  # "audio"/"video"/None
-            "image_filename": img_name,
-            "image_url": image_remote_url,
-            "image_original_url": image_remote_url if image_remote_url else None,
-            "date": dt.isoformat(),
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "created_by": current_user.get_id(),
-            "allowed_usernames": [u for u in allowed if
-                                  u in usernames and u.strip().lower() != admin_name.strip().lower()],
-        }
+        # Création SQL
+        text_id = store.create_text(
+            current_user.get_id(),
+            {
+                "title": title,
+                "body": body,
+                "context": context_val,
+                "music_url": music_url,
+                "music_original_url": music_original_url,
+                "image_filename": img_name,
+                "image_url": image_remote_url,
+                "image_original_url": image_remote_url if image_remote_url else None,
+                "date_dt": dt,
+            },
+            [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()],
+        )
+
         if youtube_mode == "audio" and music_original_url:
-            t["yt_job_id"] = jobs.enqueue_yt_audio(t["id"], music_original_url)
-        db.setdefault("texts", []).append(t)
-        write_db(db)
+            job_id = jobs.enqueue_yt_audio(text_id, music_original_url)
+            _yt_map_set(text_id, job_id)
+
         flash("Texte créé.")
-        return redirect(url_for("texts.view_text", text_id=t["id"]))
+        return redirect(url_for("texts.view_text", text_id=text_id))
 
     return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
@@ -318,30 +347,27 @@ def edit_text(text_id: int):
     if not getattr(current_user, "is_admin", False):
         from flask import abort
         abort(403)
-    db = read_db()
-    admin_name = (get_conf(db).get("admin", {}) or {}).get("username", "admin")
-    t = next((x for x in db.get("texts", []) if int(x["id"]) == text_id), None)
+
+    t = store.get_text_dict(text_id)
     if not t:
         from flask import abort
         abort(404)
 
-    usernames = [u["username"] for u in list_users(db) if u["username"].strip().lower() != admin_name.strip().lower()]
+    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
+    usernames = [u["username"] for u in store.list_users() if u["username"].strip().lower() != admin_name.strip().lower()]
 
     if request.method == "POST":
         if request.content_length and request.content_length > MAX_UPLOAD_MB * 1024 * 1024:
             flash(f"Fichier trop volumineux (> {MAX_UPLOAD_MB} Mo).")
-            return render_template("text_form.html",
-                                   is_new=False,
-            users = usernames,
-            text=dict(t, date_dt=datetime.fromisoformat(t["date"])))
+            vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
+            return render_template("text_form.html", is_new=False, users=usernames, text=vm)
+
         title = _clean_opt(request.form.get("title"))
         body = request.form.get("body")
         context_val = _clean_opt(request.form.get("context"))
-
         music_url = _clean_opt(request.form.get("music_url"))
         image_remote_url = _clean_opt(request.form.get("image_url"))
         youtube_audio = (request.form.get("youtube_audio") == "1")
-
         date_str = (request.form.get("date") or "").strip()
         allowed = request.form.getlist("allowed_users")
 
@@ -351,79 +377,92 @@ def edit_text(text_id: int):
             return render_template("text_form.html", is_new=False, users=usernames, text=vm)
 
         # Date
+        date_dt = None
         if date_str:
             try:
-                t["date"] = datetime.strptime(date_str, "%Y-%m-%dT%H:%M").isoformat()
+                date_dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M")
             except ValueError:
                 flash("Format de date invalide.")
-        else:
-            t["date"] = datetime.utcnow().isoformat()
 
         # Image upload
         img_fs = request.files.get("image_file")
+        new_img = None
         if img_fs and img_fs.filename:
             new_img = _save_upload(img_fs, ALLOWED_IMAGE_EXTS)
-            if new_img:
-                t["image_filename"] = new_img
-                t["image_url"] = None  # upload > URL
 
         # Musique
         mus_fs = request.files.get("music_file")
+        data_update = {
+            "title": title,
+            "body": body,
+            "context": context_val,
+        }
+        if date_dt:
+            data_update["date_dt"] = date_dt
+
+        if new_img:
+            data_update["image_filename"] = new_img
+            data_update["image_url"] = None
+        else:
+            if image_remote_url and not t.get("image_filename"):
+                data_update["image_url"] = image_remote_url
+                if not t.get("image_original_url"):
+                    data_update["image_original_url"] = image_remote_url
+
         if mus_fs and mus_fs.filename:
             mname = _save_upload(mus_fs, ALLOWED_AUDIO_EXTS)
-            t["music_url"] = f"/uploads/{mname}"
-            t["music_original_url"] = None
-            t["youtube_mode"] = None
+            data_update["music_url"] = f"/uploads/{mname}"
+            data_update["music_original_url"] = None
+            # stoppe un éventuel suivi de job
+            _yt_map_set(text_id, "")  # vide le mapping
         else:
             if music_url:
-                t["music_url"] = music_url
-                if music_url and _is_youtube(music_url) and youtube_audio:
-                    t["music_original_url"] = music_url
-                    t["music_url"] = None
-                    t["youtube_mode"] = "audio"
-                    t["yt_job_id"] = jobs.enqueue_yt_audio(t["id"], music_url)
-                elif music_url and _is_youtube(music_url):
-                    t["music_original_url"] = None
-                    t["youtube_mode"] = "video"
-                    t.pop("yt_job_id", None)
+                if _is_youtube(music_url) and youtube_audio:
+                    data_update["music_original_url"] = music_url
+                    data_update["music_url"] = None
+                    job_id = jobs.enqueue_yt_audio(text_id, music_url)
+                    _yt_map_set(text_id, job_id)
+                elif _is_youtube(music_url):
+                    data_update["music_url"] = music_url
+                    data_update["music_original_url"] = None
+                    _yt_map_set(text_id, "")  # plus de job
                 else:
-                    t["music_original_url"] = None
-                    t["youtube_mode"] = None
-                    t.pop("yt_job_id", None)
+                    data_update["music_url"] = music_url
+                    data_update["music_original_url"] = None
+                    _yt_map_set(text_id, "")  # plus de job
 
-        t["title"] = title
-        t["body"] = body
-        t["context"] = context_val
+        # Permissions
+        allow_final = [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()]
 
-        if not t.get("image_filename"):
-            t["image_url"] = image_remote_url
-            if image_remote_url and not t.get("image_original_url"):
-                t["image_original_url"] = image_remote_url
+        # SQL update
+        store.update_text(text_id, data_update, allow_final)
 
-        t["allowed_usernames"] = [u for u in allowed if
-                                  u in usernames and u.strip().lower() != admin_name.strip().lower()]
-        t["updated_at"] = datetime.utcnow().isoformat()
-
-        write_db(db)
         flash("Texte mis à jour.")
-        return redirect(url_for("texts.view_text", text_id=t["id"]))
+        return redirect(url_for("texts.view_text", text_id=text_id))
 
     vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
+    vm["yt_job_id"] = _yt_map_get(text_id)
     return render_template("text_form.html", is_new=False, users=usernames, text=vm)
 
 
+# ---------- Jobs endpoints ----------
 @texts_bp.route("/jobs/<job_id>/status")
 @login_required
 def job_status(job_id: str):
     j = jobs.get_job(job_id)
-    if not j: return jsonify({"state": "unknown"}), 404
-    return jsonify({"id": j["id"], "state": j["state"], "progress": j["progress"], "message": j.get("message", "")})
+    if not j:
+        return jsonify({"state": "unknown"}), 404
+    return jsonify({
+        "id": j["id"],
+        "state": j["state"],
+        "progress": j["progress"],
+        "message": j.get("message", "")
+    })
 
 
 @texts_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
 @login_required
 def job_cancel(job_id: str):
-    # admin only pour annuler
     if not getattr(current_user, "is_admin", False):
         return jsonify({"error": "forbidden"}), 403
     ok = jobs.cancel_job(job_id)
@@ -433,17 +472,18 @@ def job_cancel(job_id: str):
 @texts_bp.route("/jobs/<job_id>/retry", methods=["POST"])
 @login_required
 def job_retry(job_id: str):
-    # admin only pour relancer
     if not getattr(current_user, "is_admin", False):
         return jsonify({"error": "forbidden"}), 403
+
+    # Retrouve le text_id depuis le mapping JSON
+    text_id = _yt_map_find_text_id(job_id)
+    if not text_id:
+        return jsonify({"error": "unknown_text"}), 404
+
     new_id = jobs.retry_job(job_id)
     if not new_id:
-        return jsonify({"error": "unknown"}), 404
+        return jsonify({"error": "unknown_job"}), 404
 
-    # Rattache le nouveau job au texte qui porte encore yt_job_id=job_id
-    db = read_db()
-    t = next((x for x in db.get("texts", []) if x.get("yt_job_id") == job_id), None)
-    if t:
-        t["yt_job_id"] = new_id
-        write_db(db)
+    # Met à jour le mapping
+    _yt_map_set(text_id, new_id)
     return jsonify({"ok": True, "job_id": new_id})

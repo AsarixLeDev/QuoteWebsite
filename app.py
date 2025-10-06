@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import storage_sql
 
 from flask import Flask
 
@@ -39,6 +40,8 @@ def create_app() -> Flask:
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
+    storage_sql.init_db()
+
     from storage import get_conf
     limits = (get_conf(read_db()).get("limits") or {})
     app.config['MAX_CONTENT_LENGTH'] = int(limits.get("max_request_mb", 1024)) * 1024 * 1024
@@ -48,7 +51,6 @@ def create_app() -> Flask:
     conf = get_conf(db)
     app.config.update(
         SECRET_KEY=conf.get("secret_key"),
-        MAX_CONTENT_LENGTH=32 * 1024 * 1024,  # 32 MB uploads
         SEND_FILE_MAX_AGE_DEFAULT=0,  # utile en dev pour le cache
     )
 
@@ -120,6 +122,9 @@ def cli_main(argv=None) -> None:
     p_auth = sub.add_parser("auth-test", help="Tester un couple (username/password)")
     p_auth.add_argument("--username", required=True)
     p_auth.add_argument("--password", required=True)
+
+    p_dbinit = sub.add_parser("db-init", help="Créer les tables SQL (si absentes)")
+    p_dbmig = sub.add_parser("migrate-json-to-sql", help="Importer data.json vers la base SQL")
 
     args = parser.parse_args(argv)
 
@@ -199,6 +204,17 @@ def cli_main(argv=None) -> None:
         ok = check_admin_password(db, args.username, args.password) or check_user_password(db, args.username,
                                                                                            args.password)
         print("OK" if ok else "FAIL")
+        return
+
+    if args.cmd == "db-init":
+        storage_sql.init_db()
+        print("OK: tables créées (si besoin).");
+        return
+
+    if args.cmd == "migrate-json-to-sql":
+        storage_sql.init_db()
+        r = storage_sql.migrate_json_to_sql()
+        print(f"Migration: {r}");
         return
 
 

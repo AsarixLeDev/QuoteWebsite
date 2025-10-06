@@ -22,6 +22,8 @@ from storage import (
     ensure_unique_usernames
 )
 
+import storage_sql as store
+
 core_bp = Blueprint("core", __name__)
 
 # en haut du fichier (imports)
@@ -189,18 +191,16 @@ def login():
         db = read_db()
 
         # admin ?
-        if check_admin_password(db, username, password):
-            user = LoginUser(username, True)
-            login_user(user)
+        if store.check_admin_password(username, password):
+            login_user(LoginUser(username, True))
             current_app.logger.info("Login admin OK: %s", username)
             target = _resolve_next_for_user(next_qs, is_admin=True, username=username)
             flash("Connecté (admin).")
             return redirect(target)
 
         # user normal
-        if check_user_password(db, username, password):
-            user = LoginUser(username, False)
-            login_user(user)
+        elif store.check_user_password(username, password):
+            login_user(LoginUser(username, False))
             current_app.logger.info("Login user OK: %s", username)
             target = _resolve_next_for_user(next_qs, is_admin=False, username=username)
             flash("Connecté.")
@@ -225,19 +225,9 @@ def logout_view():
 @core_bp.route("/dashboard")
 @login_required
 def dashboard():
-    db = read_db()
-    texts = db.get("texts", [])
-    if getattr(current_user, "is_admin", False):
-        vms = [dict(t, date_dt=datetime.fromisoformat(t["date"])) for t in texts]
-    else:
-        uname = current_user.get_id()
-        allowed = [t for t in texts if uname in t.get("allowed_usernames", [])]
-        vms = [dict(t, date_dt=datetime.fromisoformat(t["date"])) for t in allowed]
-    vms.sort(key=lambda x: x["date_dt"], reverse=True)
-    for vm in vms:
-        vm["media_badge"] = _media_badge_for_text(vm)
-        vm["yt_job_id"] = vm.get("yt_job_id")  # déjà présent si dict(t, ...), mais on s’assure qu’il est là
-    return render_template("dashboard.html", texts=vms)
+    is_admin = getattr(current_user, "is_admin", False)
+    texts = store.list_texts_for_user(current_user.get_id(), is_admin)
+    return render_template("dashboard.html", texts=texts)
 
 
 # ------------------- Uploads (images/audio) -------------------
@@ -426,6 +416,22 @@ def admin_import():
         except ValueError:
             max_id = 0
         db.setdefault("next_ids", {})["text"] = int(max_id) + 1
+
+        texts = db.get("texts", [])
+        used = set()
+        for t in texts:
+            try:
+                used.add(int(t.get("id")))
+            except Exception:
+                pass
+        nid = (max(used) + 1) if used else 1
+        for t in texts:
+            try:
+                int(t.get("id"))
+            except Exception:
+                t["id"] = nid
+                nid += 1
+        db.setdefault("next_ids", {})["text"] = nid
 
         write_db(db)
         flash("Import terminé.")
