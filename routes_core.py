@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 
 from flask import (
     Blueprint, render_template, redirect, url_for, request, flash,
-    send_file, abort, send_from_directory
+    send_file, abort, send_from_directory, current_app
 )
 from flask_login import current_user, login_user, logout_user, login_required
 
@@ -30,11 +30,40 @@ core_bp = Blueprint("core", __name__)
 # en haut du fichier (imports)
 from urllib.parse import urlsplit
 import re
-from flask import current_app
 
 from storage import get_conf
 limits = (get_conf(read_db()).get("limits") or {})
 MAX_IMPORT_MB = int(limits.get("import_max_mb", 512))
+
+def _getv(row, name, default=None):
+    """Récupère une valeur depuis un dict OU un objet ORM."""
+    if isinstance(row, dict):
+        return row.get(name, default)
+    return getattr(row, name, default)
+
+def _row_to_vm(row):
+    """Convertit un row (dict ou ORM) en VM minimale (sans décrypt)."""
+    rid = _getv(row, "id")
+    date_dt = _getv(row, "date_dt") or _getv(row, "date")
+    if isinstance(date_dt, str):
+        try:
+            date_dt = datetime.fromisoformat(date_dt)
+        except Exception:
+            date_dt = datetime.utcnow()
+    if not date_dt:
+        date_dt = datetime.utcnow()
+
+    return {
+        "id": rid,
+        "date_dt": date_dt,
+        "created_by": _getv(row, "created_by"),
+        "title": _getv(row, "title"),
+        "body": _getv(row, "body"),
+        "context": _getv(row, "context"),
+        "image_filename": _getv(row, "image_filename"),
+        "image_url": _getv(row, "image_url"),
+        "music_url": _getv(row, "music_url"),
+    }
 
 def _is_safe_next(url: str | None) -> bool:
     if not url:
@@ -258,59 +287,60 @@ def logout_view():
 
 # ------------------- Dashboard -------------------
 
-@core_bp.route("/dashboard")
-# --- fonction dashboard : remplacer entièrement ---
 @login_required
 def dashboard():
+    is_admin = getattr(current_user, "is_admin", False)
+
     try:
-        is_admin = getattr(current_user, "is_admin", False)
         rows = store.list_texts_for_user(current_user.get_id(), is_admin)
+    except Exception:
+        current_app.logger.exception("dashboard: list_texts_for_user failed")
+        flash("Impossible d'afficher le tableau de bord.")
+        return render_template("dashboard.html", texts=[])
 
-        vms = []
-        for r in rows:
-            full = store.get_text_dict(r["id"]) or {}
-            title = r.get("title"); body = None; context = None
+    texts = []
+    for r in rows:
+        try:
+            vm = _row_to_vm(r)
+            # recharger le texte complet (pour always get created_by + cipher_*)
+            full = store.get_text_dict(vm["id"]) or {}
+            vm["created_by"] = full.get("created_by", vm["created_by"])
 
+            # déchiffrer si possible
+            title = vm["title"]; body = vm["body"]; context = vm["context"]
             if full.get("ciphertext") and full.get("cipher_nonce"):
                 try:
-                    clear = cserv.decrypt_text_payload(full["created_by"], full["ciphertext"], full["cipher_nonce"])
+                    clear = cserv.decrypt_text_payload(
+                        full["created_by"], full["ciphertext"], full["cipher_nonce"]
+                    )
                     title   = clear.get("title") or title
                     body    = clear.get("body")
                     context = clear.get("context")
                 except Exception:
-                    # fallback legacy si dispo
-                    title = (r.get("title") or title or "(indéchiffrable)")
-                    body = (r.get("body") or "(indéchiffrable)")
-                    context = r.get("context")
-            else:
-                body    = r.get("body")
-                context = r.get("context")
+                    current_app.logger.warning("decrypt failed on text %s", vm["id"], exc_info=True)
+                    title   = title or "(indéchiffrable)"
+                    body    = "(indéchiffrable)"
+                    context = None
 
-            vm = {
-                "id": r["id"],
-                "date_dt": r["date_dt"],
-                "created_by": full.get("created_by", r.get("created_by")),
-                "title": title or "(sans titre)",
-                "body": body,
-                "context": context,
-                "image_filename": r.get("image_filename"),
-                "image_url": r.get("image_url"),
-                "music_url": r.get("music_url"),
-            }
-            mu = full.get("music_url") or r.get("music_url")
-            vm["media_badge"] = _media_badge(mu)
+            vm["title"]   = title or "(sans titre)"
+            vm["body"]    = body
+            vm["context"] = context
+
+            # widget YT (si extraction en cours)
             try:
-                yt = (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(r["id"]))
-                if yt: vm["yt_job_id"] = yt
+                yt = (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(vm["id"]))
+                if yt:
+                    vm["yt_job_id"] = yt
             except Exception:
                 pass
-            vms.append(vm)
 
-        vms.sort(key=lambda t: t["date_dt"], reverse=True)
-        return render_template("dashboard.html", texts=vms)
-    except Exception:
-        flash("Impossible d'afficher le tableau de bord.")
-        return render_template("dashboard.html", texts=[])
+            texts.append(vm)
+        except Exception:
+            current_app.logger.exception("dashboard: failed to build VM for row=%r", r)
+            # on skip juste ce texte
+
+    texts.sort(key=lambda t: t["date_dt"], reverse=True)
+    return render_template("dashboard.html", texts=texts)
 
 
 # ------------------- Uploads (images/audio) -------------------
