@@ -71,16 +71,31 @@ def _progress_hook(job_id: str):
 
 
 def _cookief():
+    """N'utilise des cookies que si explicitement activé en conf (config.yt.use_cookies=true)."""
     try:
         conf = get_conf(read_db())
-        path = ((conf.get("yt") or {}).get("cookies_path")) or ""
-        return path if (path and os.path.isfile(path)) else None
+        yt = conf.get("yt") or {}
+        if yt.get("use_cookies"):
+            p = yt.get("cookies_path") or ""
+            if p and os.path.isfile(p):
+                return p
     except Exception:
-        return None
+        pass
+    return None
 
-# ... au-dessus : _cookief(), _progress_hook(), etc.
+def _final_audio_path(token: str) -> str | None:
+    """Trouve le fichier audio final pour ce token (préférence mp3)."""
+    for ext in ("mp3", "m4a", "webm", "opus"):
+        p = UPLOAD_DIR / f"{token}.{ext}"
+        if p.exists():
+            return str(p)
+    # fallback: parcours des fichiers correspondants
+    for name in os.listdir(UPLOAD_DIR):
+        if name.startswith(token + "."):
+            return str(UPLOAD_DIR / name)
+    return None
 
-def _do_yt_audio(job: Dict[str, Any]):
+def _do_yt_audio(job: dict):
     job_id  = job["id"]
     text_id = int(job["text_id"])
     url     = job["url"]
@@ -88,77 +103,101 @@ def _do_yt_audio(job: Dict[str, Any]):
     token = secrets.token_urlsafe(16)
     out_tmpl = str(UPLOAD_DIR / (token + ".%(ext)s"))
 
-    # premier essai : m4a si dispo, sinon bestaudio; client android (contourne parfois age-restrictions)
-    ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio/best",
+    # Options communes
+    base = {
         "outtmpl": out_tmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["android"]}},
+        "cachedir": False,  # évite /var/www/.cache
         "progress_hooks": [_progress_hook(job_id)],
+        # Post-processing: extraire **mp3** (ffmpeg requis)
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "0",  # qualité max, ré-encode si nécessaire
+        }],
+        # clients alternatifs qui passent souvent sans cookies
+        "extractor_args": {"youtube": {"player_client": ["android","web_safari"]}},
+        "retries": 3,
+        "fragment_retries": 3,
+        "sleep_requests": 0.2,
     }
     ck = _cookief()
     if ck:
-        ydl_opts["cookies"] = ck
+        base["cookiefile"] = ck
 
-    def _run_with(opts):
+    def run(opts):
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=True)
-            return y.prepare_filename(info)
+            return y.prepare_filename(info)  # nom AVANT postprocessing
 
     try:
         _set(job_id, state="running", progress=0, message="préparation…")
-        try:
-            file_path = _run_with(ydl_opts)
-        except yt_dlp.utils.DownloadError as e1:
-            # fallback 1 : format plus générique, sans client android
-            if "Requested format is not available" in str(e1):
-                opts2 = dict(ydl_opts)
-                opts2.pop("extractor_args", None)
-                opts2["format"] = "bestaudio/best"
-                file_path = _run_with(opts2)
-            else:
-                raise
 
-        if not file_path or not os.path.exists(file_path):
+        # Essai 1 : bestaudio (m4a/opus) -> postprocess MP3
+        try:
+            file_path = run(dict(base, format="bestaudio[ext=m4a]/bestaudio/best"))
+        except yt_dlp.utils.DownloadError:
+            # Essai 2 : forcer quelques ids audio fréquents
+            try:
+                file_path = run(dict(base, format="140/251/250/249/bestaudio/best"))
+            except yt_dlp.utils.DownloadError:
+                # Essai 3 : MP4 360p (18) -> postprocess MP3
+                file_path = run(dict(base, format="18"))
+
+        # Résoudre le nom final (après postprocessor) — on préfère .mp3
+        final = _final_audio_path(token)
+        if not final or not os.path.exists(final):
             _set(job_id, state="error", message="fichier final introuvable"); return
 
-        # annulation juste après DL
-        if (_get(job_id) or {}).get("cancel"):
+        # Annulation juste après DL ?
+        j = _get(job_id)
+        if j and j.get("cancel"):
             _set(job_id, state="cancelled", message="annulé")
-            try: os.remove(file_path)
+            try: os.remove(final)
             except Exception: pass
             return
 
-        rel_name = os.path.basename(file_path)
-
-        # MAJ SQL: music_url local + original
+        # Mise à jour SQL : fichier local MP3 + source youtube
+        rel = os.path.basename(final)  # ex: token.mp3
         store.update_text(text_id, {
-            "music_url": f"/uploads/{rel_name}",
+            "music_url": f"/uploads/{rel}",
             "music_original_url": url
         }, allowed_usernames=None)
 
-        # nettoie le mapping job->texte dans data.json (pour la barre)
+        # Nettoyage du mapping texte->job pour cacher le widget
         try:
             db = read_db()
-            yt = db.get("jobs", {}).get("yt", {})
-            if yt and str(text_id) in yt:
-                yt[str(text_id)] = ""
-                write_db(db)
+            m = db.get("jobs", {}).get("yt", {}) or {}
+            for k, v in list(m.items()):
+                if v == job_id:
+                    m.pop(k, None); break
+            write_db(db)
         except Exception:
             pass
 
         _set(job_id, state="done", progress=100, message="terminé")
 
     except yt_dlp.utils.DownloadError as e:
-        msg = "YouTube : format audio indisponible."
-        if "Sign in to confirm you’re not a bot" in str(e):
-            msg = "YouTube : connexion requise (ajoute un cookies.txt dans config.yt.cookies_path)."
+        # Dernier recours : ne pas bloquer la page → lecture via embed YouTube
+        try:
+            t = store.get_text_dict(text_id)
+            if t:
+                store.update_text(text_id, {"music_url": None, "music_original_url": url}, allowed_usernames=None)
+        except Exception:
+            pass
+        s = str(e)
+        if "Sign in to confirm you’re not a bot" in s:
+            msg = "YouTube : protection anti-bot — lecture via YouTube (sans cookies)."
+        elif "Requested format is not available" in s:
+            msg = "YouTube : format indisponible — lecture via YouTube."
+        else:
+            msg = "YouTube : extraction impossible — lecture via YouTube."
         _set(job_id, state="error", message=msg)
+
     except Exception as e:
         _set(job_id, state="error", message=str(e) or "échec extraction")
-
 
 def _worker_loop():
     while True:

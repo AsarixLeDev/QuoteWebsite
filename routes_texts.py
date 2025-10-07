@@ -325,7 +325,8 @@ def view_text(text_id: int):
 @login_required
 def new_text():
     # Tous les utilisateurs peuvent créer
-    usernames = store.all_usernames()
+    friends = store.list_friendship(current_user.get_id())
+    usernames = sorted(friends.get("accepted", []))
     # Exemple: si tu veux éviter de proposer le créateur lui-même:
     try:
         me = current_user.get_id()
@@ -384,8 +385,10 @@ def new_text():
                 music_url = link
 
         # Permissions
-        all_users = store.all_usernames()  # exclut admin
-        allowed_final = [u for u in request.form.getlist("allowed_users") if u in all_users]
+        allowed_raw = request.form.getlist("allowed_users")
+        friends = store.list_friendship(current_user.get_id())
+        friends_set = set(friends.get("accepted", []))
+        allowed_final = [u for u in allowed_raw if u in friends_set]
 
         # Chiffrement (titre/corps/contexte) – on suppose crypto_server importé en haut
         import crypto_server as cserv
@@ -468,7 +471,8 @@ def edit_text(text_id: int):
         vm["youtube_audio_checked"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
 
         # Permissions possibles
-        usernames = store.all_usernames()
+        friends = store.list_friendship(current_user.get_id())
+        usernames = sorted(friends.get("accepted", []))
         # Exemple: si tu veux éviter de proposer le créateur lui-même:
         try:
             me = current_user.get_id()
@@ -550,8 +554,10 @@ def edit_text(text_id: int):
                 new_music_original = None
 
     # Permissions
-    all_users = store.all_usernames()  # exclut admin
-    allowed_final = [u for u in request.form.getlist("allowed_users") if u in all_users]
+    allowed_raw = request.form.getlist("allowed_users")
+    friends = store.list_friendship(current_user.get_id())
+    friends_set = set(friends.get("accepted", []))
+    allowed_final = [u for u in allowed_raw if u in friends_set]
 
     # Chiffrement (re-écrit toujours la version claire)
     import crypto_server as cserv
