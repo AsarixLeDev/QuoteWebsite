@@ -47,7 +47,7 @@
     <hr>
 
     {# Extraction YouTube en cours -> widget (pas d'embed vidéo) #}
-    {% if text.yt_audio_pending %}
+    {% if text.yt_audio_pending and text.yt_job_id %}
       <div class="card subtle" data-job-id="{{ text.yt_job_id }}">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
           <div><strong>Extraction audio YouTube</strong></div>

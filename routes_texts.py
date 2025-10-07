@@ -306,11 +306,12 @@ def view_text(text_id: int):
     vm["context"] = context
 
     # embed / widget: priorité au fichier local; si YT audio en cours => widget
-    vm["embed"] = _compute_embed_for_view(t)
+    yt_job_id = _yt_map_get(int(t["id"]))
+    vm["yt_job_id"] = yt_job_id
+    vm["yt_audio_pending"] = bool(yt_job_id and _is_youtube(t.get("music_original_url")) and not t.get("music_url"))
 
-    # job id (si extraction YT en cours)
-    vm["yt_job_id"] = _yt_map_get(int(t["id"]))  # pour le polling
-    vm["yt_audio_pending"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
+    # embed: si pas de job actif -> on montre l'embed normal (YouTube ou audio local)
+    vm["embed"] = _detect_embed(t.get("music_url") or t.get("music_original_url"))
 
     # état spotify (si tu l’utilises)
     try:

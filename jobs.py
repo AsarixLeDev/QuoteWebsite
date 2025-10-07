@@ -95,7 +95,7 @@ def _final_audio_path(token: str) -> str | None:
             return str(UPLOAD_DIR / name)
     return None
 
-def _do_yt_audio(job: dict):
+def _do_yt_audio(job: Dict[str, Any]):
     job_id  = job["id"]
     text_id = int(job["text_id"])
     url     = job["url"]
@@ -103,76 +103,85 @@ def _do_yt_audio(job: dict):
     token = secrets.token_urlsafe(16)
     out_tmpl = str(UPLOAD_DIR / (token + ".%(ext)s"))
 
-    # Options communes
     base = {
         "outtmpl": out_tmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "cachedir": False,  # évite /var/www/.cache
-        "progress_hooks": [_progress_hook(job_id)],
-        # Post-processing: extraire **mp3** (ffmpeg requis)
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "0",  # qualité max, ré-encode si nécessaire
-        }],
-        # clients alternatifs qui passent souvent sans cookies
-        "extractor_args": {"youtube": {"player_client": ["android","web_safari"]}},
+        "cachedir": False,
         "retries": 3,
         "fragment_retries": 3,
         "sleep_requests": 0.2,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "0"
+        }],
+        "progress_hooks": [_progress_hook(job_id)],
     }
+    # cookies facultatifs (seulement si explicitement activés)
     ck = _cookief()
     if ck:
         base["cookiefile"] = ck
+        base["extractor_args"] = {"youtube": {"player_client": ["web_safari"]}}
+    else:
+        base["extractor_args"] = {"youtube": {"player_client": ["android","web_safari"]}}
 
     def run(opts):
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=True)
-            return y.prepare_filename(info)  # nom AVANT postprocessing
+            return y.prepare_filename(info)
 
     try:
         _set(job_id, state="running", progress=0, message="préparation…")
-
-        # Essai 1 : bestaudio (m4a/opus) -> postprocess MP3
+        # 1) bestaudio m4a/opus
         try:
             file_path = run(dict(base, format="bestaudio[ext=m4a]/bestaudio/best"))
         except yt_dlp.utils.DownloadError:
-            # Essai 2 : forcer quelques ids audio fréquents
+            # 2) ids audio fréquents
             try:
                 file_path = run(dict(base, format="140/251/250/249/bestaudio/best"))
             except yt_dlp.utils.DownloadError:
-                # Essai 3 : MP4 360p (18) -> postprocess MP3
+                # 3) MP4 360p (18) -> MP3 via postprocessor
                 file_path = run(dict(base, format="18"))
 
-        # Résoudre le nom final (après postprocessor) — on préfère .mp3
-        final = _final_audio_path(token)
-        if not final or not os.path.exists(final):
-            _set(job_id, state="error", message="fichier final introuvable"); return
+        # localiser la sortie finale (post-traitée)
+        final = None
+        for ext in ("mp3","m4a","webm","opus","mp4"):
+            p = UPLOAD_DIR / f"{token}.{ext}"
+            if p.exists():
+                final = p
+                break
+        if not final:
+            _set(job_id, state="error", message="fichier final introuvable")
+            # mapping off → l’UI basculera sur l’embed
+            try:
+                db = read_db(); m = db.get("jobs", {}).get("yt", {}) or {}
+                for k,v in list(m.items()):
+                    if v == job_id: m.pop(k, None); break
+                write_db(db)
+            except Exception:
+                pass
+            return
 
-        # Annulation juste après DL ?
-        j = _get(job_id)
-        if j and j.get("cancel"):
+        # annulation ?
+        if (_get(job_id) or {}).get("cancel"):
             _set(job_id, state="cancelled", message="annulé")
             try: os.remove(final)
             except Exception: pass
             return
 
-        # Mise à jour SQL : fichier local MP3 + source youtube
-        rel = os.path.basename(final)  # ex: token.mp3
+        # MAJ SQL : fichier local + source
         store.update_text(text_id, {
-            "music_url": f"/uploads/{rel}",
+            "music_url": f"/uploads/{final.name}",
             "music_original_url": url
         }, allowed_usernames=None)
 
-        # Nettoyage du mapping texte->job pour cacher le widget
+        # mapping off → plus de widget
         try:
-            db = read_db()
-            m = db.get("jobs", {}).get("yt", {}) or {}
-            for k, v in list(m.items()):
-                if v == job_id:
-                    m.pop(k, None); break
+            db = read_db(); m = db.get("jobs", {}).get("yt", {}) or {}
+            for k,v in list(m.items()):
+                if v == job_id: m.pop(k, None); break
             write_db(db)
         except Exception:
             pass
@@ -180,13 +189,20 @@ def _do_yt_audio(job: dict):
         _set(job_id, state="done", progress=100, message="terminé")
 
     except yt_dlp.utils.DownloadError as e:
-        # Dernier recours : ne pas bloquer la page → lecture via embed YouTube
+        # échec → ne pas bloquer : embed YouTube
         try:
-            t = store.get_text_dict(text_id)
-            if t:
-                store.update_text(text_id, {"music_url": None, "music_original_url": url}, allowed_usernames=None)
+            store.update_text(text_id, {"music_url": None, "music_original_url": url}, allowed_usernames=None)
         except Exception:
             pass
+        # mapping off pour enlever le widget
+        try:
+            db = read_db(); m = db.get("jobs", {}).get("yt", {}) or {}
+            for k,v in list(m.items()):
+                if v == job_id: m.pop(k, None); break
+            write_db(db)
+        except Exception:
+            pass
+
         s = str(e)
         if "Sign in to confirm you’re not a bot" in s:
             msg = "YouTube : protection anti-bot — lecture via YouTube (sans cookies)."
@@ -197,7 +213,16 @@ def _do_yt_audio(job: dict):
         _set(job_id, state="error", message=msg)
 
     except Exception as e:
+        # mapping off aussi en cas d’imprévu
+        try:
+            db = read_db(); m = db.get("jobs", {}).get("yt", {}) or {}
+            for k,v in list(m.items()):
+                if v == job_id: m.pop(k, None); break
+            write_db(db)
+        except Exception:
+            pass
         _set(job_id, state="error", message=str(e) or "échec extraction")
+
 
 def _worker_loop():
     while True:
