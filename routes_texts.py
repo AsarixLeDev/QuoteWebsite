@@ -277,14 +277,10 @@ def view_text(text_id: int):
         abort(404)
 
     # Permissions
-    if not getattr(current_user, "is_admin", False):
-        me = (current_user.get_id() or "").strip().lower()
-        author = (t.get("created_by") or "").strip().lower()
-        is_owner = (me == author)
-        is_allowed = current_user.get_id() in (t.get("allowed_usernames") or [])
-        if not (is_owner or is_allowed):
-            from flask import abort
-            abort(403)
+    allowed = store.can_user_view_text(current_user.get_id(), text_id)
+    if not allowed:
+        from flask import abort
+        abort(403)
 
     # VM
     vm = dict(t)
@@ -329,9 +325,13 @@ def view_text(text_id: int):
 @login_required
 def new_text():
     # Tous les utilisateurs peuvent créer
-    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in store.list_users()
-                 if u["username"].strip().lower() != admin_name.strip().lower()]
+    usernames = store.all_usernames()
+    # Exemple: si tu veux éviter de proposer le créateur lui-même:
+    try:
+        me = current_user.get_id()
+        usernames = [u for u in usernames if u.strip().lower() != me.strip().lower()]
+    except Exception:
+        pass
 
     if request.method == "POST":
         if request.content_length and request.content_length > MAX_UPLOAD_MB * 1024 * 1024:
@@ -384,9 +384,8 @@ def new_text():
                 music_url = link
 
         # Permissions
-        allowed = request.form.getlist("allowed_users")
-        allowed_final = [u for u in allowed if
-                         u in usernames and u.strip().lower() != admin_name.strip().lower()]
+        all_users = store.all_usernames()  # exclut admin
+        allowed_final = [u for u in request.form.getlist("allowed_users") if u in all_users]
 
         # Chiffrement (titre/corps/contexte) – on suppose crypto_server importé en haut
         import crypto_server as cserv
@@ -469,9 +468,13 @@ def edit_text(text_id: int):
         vm["youtube_audio_checked"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
 
         # Permissions possibles
-        admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-        usernames = [u["username"] for u in store.list_users()
-                     if u["username"].strip().lower() != admin_name.strip().lower()]
+        usernames = store.all_usernames()
+        # Exemple: si tu veux éviter de proposer le créateur lui-même:
+        try:
+            me = current_user.get_id()
+            usernames = [u for u in usernames if u.strip().lower() != me.strip().lower()]
+        except Exception:
+            pass
         return render_template("text_form.html", is_new=False, users=usernames, text=vm)
 
     # POST -> mise à jour
@@ -547,12 +550,8 @@ def edit_text(text_id: int):
                 new_music_original = None
 
     # Permissions
-    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in store.list_users()
-                 if u["username"].strip().lower() != admin_name.strip().lower()]
-    allowed = request.form.getlist("allowed_users")
-    allowed_final = [u for u in allowed if
-                     u in usernames and u.strip().lower() != admin_name.strip().lower()]
+    all_users = store.all_usernames()  # exclut admin
+    allowed_final = [u for u in request.form.getlist("allowed_users") if u in all_users]
 
     # Chiffrement (re-écrit toujours la version claire)
     import crypto_server as cserv

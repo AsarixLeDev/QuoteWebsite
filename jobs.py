@@ -100,7 +100,7 @@ def _do_yt_audio(job: Dict[str, Any]):
     }
     ck = _cookief()
     if ck:
-        ydl_opts["cookiefile"] = ck
+        ydl_opts["cookies"] = ck
 
     def _run_with(opts):
         with yt_dlp.YoutubeDL(opts) as y:

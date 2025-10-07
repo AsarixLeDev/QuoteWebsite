@@ -488,6 +488,75 @@ def list_texts_visible_to(viewer_username:str, author_username:str) -> List[Text
         rows = s.scalars(q.order_by(Text.date.desc())).all()
         return rows
 
+
+# --- Access helpers ----------------------------------------------------------
+def all_usernames(exclude: list[str] | None = None) -> list[str]:
+    """Liste de tous les usernames (sans admin par défaut, et sans doublons)."""
+    ex = {x.strip().lower() for x in (exclude or [])}
+    with SessionLocal() as s:
+        q = select(User.username)
+        rows = s.execute(q).scalars().all()
+        return [u for u in rows if u.strip().lower() not in ex]
+
+def can_user_view_text(username: str, text_id: int) -> bool:
+    """Autorisé si créateur OU explicitement dans allowed_users."""
+    with SessionLocal() as s:
+        u = s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
+        if not u:
+            return False
+        # Créateur ?
+        t = s.get(Text, text_id)
+        if not t:
+            return False
+        if t.created_by_id == u.id:
+            return True
+        # Autorisé via table de jointure ?
+        ok = s.scalar(
+            select(text_access.c.text_id).where(
+                text_access.c.text_id == text_id,
+                text_access.c.user_id == u.id
+            ).limit(1)
+        )
+        return bool(ok)
+
+def list_texts_accessible(username: str) -> list[dict]:
+    """Texte créés par l’utilisateur + textes auxquels il a accès via permission."""
+    with SessionLocal() as s:
+        u = s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
+        if not u:
+            return []
+        txts = s.scalars(
+            select(Text).where(
+                sa.or_(
+                    Text.created_by_id == u.id,
+                    Text.id.in_(select(text_access.c.text_id).where(text_access.c.user_id == u.id))
+                )
+            ).order_by(Text.date.desc())
+        ).all()
+
+        out = []
+        for t in txts:
+            out.append({
+                "id": t.id,
+                "title": t.title,
+                "body": t.body,                      # (sera déchiffré plus haut dans la route si besoin)
+                "context": t.context,
+                "music_url": t.music_url,
+                "music_original_url": t.music_original_url,
+                "image_filename": t.image_filename,
+                "image_url": t.image_url,
+                "image_original_url": t.image_original_url,
+                "date_dt": t.date,
+                "date": t.date.isoformat(),
+                "created_by": t.created_by_user.username,
+                "allowed_usernames": [uu.username for uu in t.allowed_users],
+                "youtube_mode": getattr(t, "youtube_mode", None),
+                "yt_job_id": getattr(t, "yt_job_id", None),
+                "default_allow": getattr(t, "default_allow", False),
+            })
+        return out
+
+
 # Exports utiles à d'autres modules
 __all__ = [
     "sa", "select", "SessionLocal", "init_db",

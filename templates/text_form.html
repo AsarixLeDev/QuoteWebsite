@@ -82,21 +82,114 @@
 
   <!-- Permissions -->
   <div class="card subtle" style="margin-top:10px;">
-    <div style="font-weight:700; margin-bottom:6px;">Qui peut voir ce texte ?</div>
-    {% if users|length == 0 %}
-      <div class="text-muted">Aucun utilisateur n’est défini. (Création depuis la console.)</div>
-    {% else %}
-      <div class="chip-group">
-        {% for uname in users %}
-          <label class="checkbox-pill">
-            <input type="checkbox" name="allowed_users" value="{{ uname }}"
-                   {% if text and text.allowed_usernames and uname in text.allowed_usernames %}checked{% endif %}>
-            <span>{{ uname }}</span>
-          </label>
-        {% endfor %}
-      </div>
-    {% endif %}
+  <div style="font-weight:700; margin-bottom:6px;">Qui peut voir ce texte ?</div>
+
+  {% set SUGGEST = users or [] %}  {# liste côté serveur, sans admin #}
+  {% set PRE = (text.allowed_usernames if text and text.allowed_usernames else []) %}
+
+  {% if SUGGEST|length == 0 %}
+    <div class="text-muted">Aucun utilisateur n’est défini (création depuis la console).</div>
+  {% else %}
+
+  <div class="perm-row" style="display:flex; flex-direction:column; gap:10px;">
+    <div class="perm-input-wrap" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <input class="input" type="text" id="perm-input" placeholder="Ajouter un utilisateur…"
+             autocomplete="off" autocapitalize="off" spellcheck="false"
+             list="perm-suggest">
+      <datalist id="perm-suggest">
+        {% for u in SUGGEST %}<option value="{{ u }}">{% endfor %}
+      </datalist>
+      <button type="button" class="button small" id="perm-add">Ajouter</button>
+    </div>
+
+    <div id="perm-chips" class="chip-stack">
+      {# Pré-sélection (édition) : on recrée les chips + inputs hidden #}
+      {% for u in PRE %}
+        <span class="chip" data-u="{{ u }}">
+          {{ u }} <button class="chip-x" type="button" aria-label="Retirer" title="Retirer">&times;</button>
+          <input type="hidden" name="allowed_users" value="{{ u }}">
+        </span>
+      {% endfor %}
+    </div>
+
+    <div class="text-muted" style="font-size:.9rem;">
+      Astuce : tape un nom, vérifie le contour <em>(vert = existe, rouge = inconnu)</em>, puis “Entrée” ou “Ajouter”.
+    </div>
   </div>
+
+  {% endif %}
+</div>
+
+<script>
+(function(){
+  const SUGGEST = new Set({{ SUGGEST|tojson }});
+  const input   = document.getElementById('perm-input');
+  const addBtn  = document.getElementById('perm-add');
+  const chips   = document.getElementById('perm-chips');
+
+  function norm(s){ return (s||'').trim(); }
+
+  function markValidity(){
+    const v = norm(input.value);
+    input.classList.remove('is-valid','is-invalid');
+    if(!v){ return false; }
+    const ok = SUGGEST.has(v);
+    input.classList.add(ok ? 'is-valid' : 'is-invalid');
+    return ok;
+  }
+
+  function alreadyAdded(u){
+    return !!chips.querySelector('.chip[data-u="'+CSS.escape(u)+'"]');
+  }
+
+  function addUser(u){
+    if(!u || !SUGGEST.has(u) || alreadyAdded(u)) return;
+    const span = document.createElement('span');
+    span.className = 'chip';
+    span.setAttribute('data-u', u);
+    span.innerHTML = `
+      ${u}
+      <button type="button" class="chip-x" aria-label="Retirer" title="Retirer">&times;</button>
+      <input type="hidden" name="allowed_users" value="${u}">
+    `;
+    chips.appendChild(span);
+  }
+
+  function removeChip(btn){
+    const chip = btn.closest('.chip');
+    if(chip) chip.remove();
+  }
+
+  input.addEventListener('input', markValidity);
+  input.addEventListener('change', markValidity);
+  input.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      if(markValidity()){
+        const v = norm(input.value);
+        addUser(v);
+        input.value = '';
+        input.classList.remove('is-valid','is-invalid');
+      }
+    }
+  });
+
+  if(addBtn){
+    addBtn.addEventListener('click', ()=>{
+      if(markValidity()){
+        addUser(norm(input.value));
+        input.value = '';
+        input.classList.remove('is-valid','is-invalid');
+      }
+    });
+  }
+
+  chips.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.chip-x');
+    if(btn) removeChip(btn);
+  });
+})();
+</script>
 
   <!-- Actions -->
   <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">

@@ -1,6 +1,6 @@
 {% extends 'layout.html' %}
 {% block content %}
-<h2 style="margin-bottom:10px;">{{ 'Tous les textes' if current_user.is_admin else 'Vos textes' }}</h2>
+<h2 style="margin-bottom:10px;">Bonne lecture !</h2>
 
 {% if texts|length == 0 %}
   <div class="card">

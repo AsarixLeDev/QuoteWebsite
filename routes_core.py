@@ -290,10 +290,8 @@ def logout_view():
 @core_bp.route("/dashboard")
 @login_required
 def dashboard():
-    is_admin = getattr(current_user, "is_admin", False)
-
     try:
-        rows = store.list_texts_for_user(current_user.get_id(), is_admin)
+        rows = store.list_texts_accessible(current_user.get_id())
     except Exception:
         current_app.logger.exception("dashboard: list_texts_for_user failed")
         flash("Impossible d'afficher le tableau de bord.")
