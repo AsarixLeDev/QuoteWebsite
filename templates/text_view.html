@@ -14,7 +14,7 @@
     {% endif %}
   </div>
 
-  {% if current_user.is_admin and text.created_by %}
+  {% if text.created_by %}
     <div class="text-muted" style="margin-top:-4px;">par {{ text.created_by }}</div>
   {% endif %}
 
@@ -36,90 +36,46 @@
     <p class="text-muted"><em>{{ text.context }}</em></p>
   {% endif %}
 
-  <!-- Corps (déjà déchiffré côté serveur dans routes_texts.py) -->
+  <!-- Corps (déjà déchiffré côté serveur) -->
   <div style="white-space: pre-wrap; line-height: 1.65;">
     {{ text.body }}
   </div>
 
   <!-- Musique -->
-  {% set has_music = (text.music_url or embed.type != 'none') %}
+  {% set has_music = (text.music_url or embed.type != 'none' or text.yt_audio_pending) %}
   {% if has_music %}
     <hr>
 
-    {# Cas spécial : YouTube en extraction audio (job en cours) #}
-    {% if text.youtube_mode == 'audio' and (not text.music_url) and text.yt_job_id %}
-      <div class="card subtle" id="yt-job" style="background:#fbfdff;">
+    {# Extraction YouTube en cours -> widget (pas d'embed vidéo) #}
+    {% if text.yt_audio_pending %}
+      <div class="card subtle" data-job-id="{{ text.yt_job_id }}">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-          <div style="font-weight:700;">Chargement… extraction de l’audio YouTube</div>
-          {% if current_user.is_admin %}
-            <div class="inline-actions">
-              <button class="button small danger" id="btn-cancel">Annuler</button>
-              <button class="button small secondary" id="btn-retry" style="display:none;">Relancer</button>
-            </div>
+          <div><strong>Extraction audio YouTube</strong></div>
+          {% set is_owner = (text.created_by is defined and text.created_by == current_user.get_id()) %}
+          {% if current_user.is_authenticated and (current_user.is_admin or is_owner) %}
+          <div class="inline-actions">
+            <button class="button small danger btn-cancel">Annuler</button>
+            <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
+          </div>
           {% endif %}
         </div>
-        <div class="progress" style="margin-top:8px;">
-          <div class="progress-bar" id="yt-progress" style="width:0%"></div>
+        <div class="progress" style="margin-top:6px;">
+          <div class="progress-bar" style="width:0%"></div>
         </div>
-        <div class="text-muted" id="yt-msg" style="margin-top:6px;">Préparation…</div>
+        <div class="text-muted job-msg" style="margin-top:6px;">Préparation…</div>
       </div>
 
-      <script>
-      (function(){
-        const jobId = "{{ text.yt_job_id }}";
-        const bar = document.getElementById('yt-progress');
-        const msg = document.getElementById('yt-msg');
-        const btnCancel = document.getElementById('btn-cancel');
-        const btnRetry  = document.getElementById('btn-retry');
-
-        async function poll(){
-          try{
-            const r = await fetch("/jobs/"+jobId+"/status");
-            if(!r.ok){ if(msg) msg.textContent="Job inconnu."; return; }
-            const j = await r.json();
-            if(bar) bar.style.width = (j.progress||0)+"%";
-            if(msg) msg.textContent = (j.state||"") + (j.message ? " — "+j.message : "");
-            if(j.state === "done"){ location.reload(); return; }
-            if(j.state === "error"){ if(btnRetry) btnRetry.style.display='inline-block'; if(btnCancel) btnCancel.disabled=true; return; }
-            if(j.state === "cancelled"){ if(msg) msg.textContent="Annulé"; if(btnRetry) btnRetry.style.display='inline-block'; return; }
-            setTimeout(poll, 1000);
-          }catch(e){
-            setTimeout(poll, 2000);
-          }
-        }
-
-        {% if current_user.is_admin %}
-        if(btnCancel){
-          btnCancel.addEventListener('click', async ()=>{
-            btnCancel.disabled = true;
-            await fetch("/jobs/"+jobId+"/cancel", {method:"POST"});
-            setTimeout(poll, 300);
-          });
-        }
-        if(btnRetry){
-          btnRetry.addEventListener('click', async ()=>{
-            btnRetry.disabled = true;
-            const r = await fetch("/jobs/"+jobId+"/retry", {method:"POST"});
-            if(r.ok) location.reload(); else btnRetry.disabled=false;
-          });
-        }
-        {% endif %}
-
-        if(jobId){ poll(); }
-      })();
-      </script>
-
     {% else %}
-      {# 1) Fichier local (upload ou extraction terminée) #}
+      {# 1) Fichier local (upload / extraction terminée) #}
       {% if text.music_url and text.music_url.startswith('/uploads/') %}
-        <audio controls style="width:100%"><source src="{{ text.music_url }}"></audio>
+        <audio controls style="width:100%" class="pn-audio"><source src="{{ text.music_url }}"></audio>
         {% if text.music_original_url %}
           <p class="text-muted" style="margin-top:6px;">Source originale : {{ text.music_original_url }}</p>
         {% endif %}
 
       {# 2) Audio direct #}
       {% elif embed.type == 'audio_direct' %}
-        <audio controls style="width:100%"><source src="{{ embed.src }}"></audio>
+        <audio controls style="width:100%" class="pn-audio"><source src="{{ embed.src }}"></audio>
 
       {# 3) Spotify #}
       {% elif embed.type == 'spotify' %}
@@ -130,7 +86,7 @@
           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
           loading="lazy"></iframe>
 
-      {# 4) YouTube #}
+      {# 4) YouTube (vidéo) #}
       {% elif embed.type == 'youtube' %}
         <div class="iframe-wrap">
           <iframe
@@ -185,7 +141,7 @@
   <!-- Actions -->
   <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
     {% set is_owner = (text.created_by is defined and text.created_by == current_user.get_id()) %}
-    {% if current_user.is_admin or is_owner %}
+    {% if is_owner %}
       <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=text.id) }}">Modifier</a>
       <form method="post" action="{{ url_for('texts.delete_text', text_id=text.id) }}"
             onsubmit="return confirm('Supprimer ce texte ?');" style="margin:0;">
@@ -195,5 +151,63 @@
     <a class="button" href="{{ url_for('core.dashboard') }}">Retour</a>
   </div>
 </div>
+
+<script>
+/* Polling du job YT + volume des <audio> */
+(function(){
+  document.querySelectorAll('audio.pn-audio').forEach(a => { try{ a.volume = 0.5; }catch(e){} });
+
+  const card = document.querySelector('[data-job-id]');
+  if(!card) return;
+  const id = card.getAttribute('data-job-id');
+  const bar = card.querySelector('.progress-bar');
+  const msg = card.querySelector('.job-msg');
+  const btnCancel = card.querySelector('.btn-cancel');
+  const btnRetry = card.querySelector('.btn-retry');
+
+  async function poll(){
+    try{
+      const r = await fetch("/jobs/"+id+"/status");
+      if(!r.ok){ if(msg) msg.textContent="Job inconnu."; return; }
+      const j = await r.json();
+      if(bar) bar.style.width=(j.progress||0)+"%";
+      if(msg) msg.textContent = (j.state||"")+(j.message? " — "+j.message : "");
+      if(j.state === "done"){ location.reload(); return; }
+      if(j.state === "error" || j.state === "missing"){
+        if(btnRetry) btnRetry.style.display='inline-block';
+        if(btnCancel) btnCancel.disabled=true;
+        return;
+      }
+      if(j.state === "cancelled"){
+        if(msg) msg.textContent="Annulé";
+        if(btnRetry) btnRetry.style.display='inline-block';
+        return;
+      }
+      setTimeout(poll, 1000);
+    }catch(e){ setTimeout(poll, 2000); }
+  }
+  poll();
+
+  {% set is_owner = (text.created_by is defined and text.created_by == current_user.get_id()) %}
+  {% if current_user.is_authenticated and (current_user.is_admin or is_owner) %}
+  if(btnCancel && !btnCancel._bound){
+    btnCancel._bound = true;
+    btnCancel.addEventListener('click', async()=>{
+      btnCancel.disabled=true;
+      await fetch("/jobs/"+id+"/cancel", {method:"POST"});
+      setTimeout(()=>location.reload(), 300);
+    });
+  }
+  if(btnRetry && !btnRetry._bound){
+    btnRetry._bound = true;
+    btnRetry.addEventListener('click', async()=>{
+      btnRetry.disabled=true;
+      const r = await fetch("/jobs/"+id+"/retry", {method:"POST"});
+      if(r.ok) location.reload(); else btnRetry.disabled=false;
+    });
+  }
+  {% endif %}
+})();
+</script>
 
 {% endblock %}
