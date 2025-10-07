@@ -287,6 +287,7 @@ def logout_view():
 
 # ------------------- Dashboard -------------------
 
+@core_bp.route("/dashboard")
 @login_required
 def dashboard():
     is_admin = getattr(current_user, "is_admin", False)
