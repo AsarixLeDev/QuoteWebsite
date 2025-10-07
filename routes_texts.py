@@ -27,6 +27,49 @@ _limits = (get_conf(read_db()).get("limits") or {})
 MAX_UPLOAD_MB = int(_limits.get("upload_max_mb", 32))
 
 
+def _yt_map_set(text_id: int, job_id: str) -> None:
+    db = read_db()
+    db.setdefault("jobs", {}).setdefault("yt", {})[str(text_id)] = job_id
+    write_db(db)
+
+def _yt_map_get(text_id: int) -> str | None:
+    return (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(text_id)) or None
+
+def _yt_map_find_text_id(job_id: str) -> int | None:
+    m = (read_db().get("jobs", {}).get("yt", {}) or {})
+    for k, v in m.items():
+        if v == job_id:
+            try: return int(k)
+            except: return None
+    return None
+
+
+def _yt_job_id_for(text_id: int) -> str | None:
+    """Retourne l'id de job yt-dlp pour un texte depuis data.json (mapping job)."""
+    try:
+        mapping = (read_db().get("jobs", {}).get("yt", {}) or {})
+        v = mapping.get(str(text_id))
+        return v or None
+    except Exception:
+        return None
+
+def _compute_embed_for_view(t: dict) -> dict:
+    """
+    Règle d'affichage:
+      - Si fichier local (/uploads/xxx) -> audio_direct
+      - Si music_original_url est YouTube ET pas de fichier local -> extraction en cours -> pas d'embed, on affiche le widget
+      - Sinon: détection standard (_detect_embed) sur music_url puis music_original_url
+    """
+    u = t.get("music_url")
+    if u and isinstance(u, str) and u.startswith("/uploads/"):
+        return {"type": "audio_direct", "src": u}
+    # extraction YT audio en cours ?
+    if _is_youtube(t.get("music_original_url")) and not t.get("music_url"):
+        return {"type": "pending", "src": None}
+    src = t.get("music_url") or t.get("music_original_url")
+    return _detect_embed(src)
+
+
 # ---------- Helpers upload ----------
 def _is_allowed(filename: str, allowed: set[str]) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed
@@ -235,7 +278,11 @@ def view_text(text_id: int):
 
     # Permissions
     if not getattr(current_user, "is_admin", False):
-        if current_user.get_id() not in (t.get("allowed_usernames") or []):
+        me = (current_user.get_id() or "").strip().lower()
+        author = (t.get("created_by") or "").strip().lower()
+        is_owner = (me == author)
+        is_allowed = current_user.get_id() in (t.get("allowed_usernames") or [])
+        if not (is_owner or is_allowed):
             from flask import abort
             abort(403)
 
@@ -244,6 +291,7 @@ def view_text(text_id: int):
     vm["date_dt"] = datetime.fromisoformat(t["date"]) if t.get("date") else datetime.utcnow()
 
     # déchiffre pour l’affichage
+    import crypto_server as cserv
     title = t.get("title");
     body = t.get("body");
     context = t.get("context")
@@ -257,14 +305,16 @@ def view_text(text_id: int):
             title = title or "(indéchiffrable)";
             body = "(indéchiffrable)";
             context = None
-
     vm["title"] = title or "(sans titre)"
     vm["body"] = body
     vm["context"] = context
 
-    # musique
-    src = t.get("music_url") or t.get("music_original_url")
-    vm["embed"] = _detect_embed(src)
+    # embed / widget: priorité au fichier local; si YT audio en cours => widget
+    vm["embed"] = _compute_embed_for_view(t)
+
+    # job id (si extraction YT en cours)
+    vm["yt_job_id"] = _yt_map_get(int(t["id"]))  # pour le polling
+    vm["yt_audio_pending"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
 
     # état spotify (si tu l’utilises)
     try:
@@ -278,13 +328,12 @@ def view_text(text_id: int):
 @texts_bp.route("/texts/new", methods=["GET", "POST"])
 @login_required
 def new_text():
-
-    # Liste des users (exclure l'admin du choix)
+    # Tous les utilisateurs peuvent créer
     admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in store.list_users() if u["username"].strip().lower() != admin_name.strip().lower()]
+    usernames = [u["username"] for u in store.list_users()
+                 if u["username"].strip().lower() != admin_name.strip().lower()]
 
     if request.method == "POST":
-        # limite métier
         if request.content_length and request.content_length > MAX_UPLOAD_MB * 1024 * 1024:
             flash(f"Fichier trop volumineux (> {MAX_UPLOAD_MB} Mo).")
             return render_template("text_form.html", is_new=True, users=usernames, text=None)
@@ -292,17 +341,12 @@ def new_text():
         title = _clean_opt(request.form.get("title"))
         body = request.form.get("body")
         context_val = _clean_opt(request.form.get("context"))
-        music_url = _clean_opt(request.form.get("music_url"))
-        image_remote_url = _clean_opt(request.form.get("image_url"))
-        youtube_audio = (request.form.get("youtube_audio") == "1")
-        date_str = (request.form.get("date") or "").strip()
-        allowed = request.form.getlist("allowed_users")
-
         if not body:
             flash("Le texte est requis.")
             return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
         # Date
+        date_str = (request.form.get("date") or "").strip()
         dt = datetime.utcnow()
         if date_str:
             try:
@@ -311,32 +355,48 @@ def new_text():
                 flash("Format de date invalide.")
                 return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
-        # Image upload
+        # Image
         img_fs = request.files.get("image_file")
         img_name = _save_upload(img_fs, ALLOWED_IMAGE_EXTS) if img_fs and img_fs.filename else None
+        image_remote_url = _clean_opt(request.form.get("image_url"))
 
         # Musique
         mus_fs = request.files.get("music_file")
-        music_original_url = None
-        youtube_mode = None
+        link = _clean_opt(request.form.get("music_url"))
+        want_yt_audio = (request.form.get("youtube_audio") == "1")
+
+        music_url = None              # ce qui sera lu par l'embed audio local SI présent
+        music_original_url = None     # on garde l'URL d'origine (YouTube / autre)
+
         if mus_fs and mus_fs.filename:
-            mus_name = _save_upload(mus_fs, ALLOWED_AUDIO_EXTS)
-            music_url = f"/uploads/{mus_name}"
-        elif music_url and _is_youtube(music_url) and youtube_audio:
-            music_original_url = music_url
-            youtube_mode = "audio"
-            music_url = None  # sera rempli à la fin du job
-        elif music_url and _is_youtube(music_url):
-            youtube_mode = "video"
+            mname = _save_upload(mus_fs, ALLOWED_AUDIO_EXTS)
+            if mname:
+                music_url = f"/uploads/{mname}"
+        elif link:
+            if _is_youtube(link):
+                if want_yt_audio:
+                    # Extraction audio -> pas d'embed vidéo : on laisse music_url=None et on garde l'original
+                    music_original_url = link
+                else:
+                    # Mode vidéo : on embarque YouTube directement
+                    music_url = link
+            else:
+                music_url = link
 
-        allowed_final_list = [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()]
+        # Permissions
+        allowed = request.form.getlist("allowed_users")
+        allowed_final = [u for u in allowed if
+                         u in usernames and u.strip().lower() != admin_name.strip().lower()]
 
+        # Chiffrement (titre/corps/contexte) – on suppose crypto_server importé en haut
+        import crypto_server as cserv
         clear = {"title": title, "body": body, "context": context_val}
         enc = cserv.encrypt_text_payload(current_user.get_id(), clear)
 
+        # Création SQL
         text_id = store.create_text(
-            current_user.get_id(),
-            {
+            created_by_username=current_user.get_id(),
+            data={
                 "cipher_alg": enc["cipher_alg"],
                 "ciphertext": enc["ciphertext"],
                 "cipher_nonce": enc["cipher_nonce"],
@@ -348,10 +408,11 @@ def new_text():
                 "image_original_url": image_remote_url if image_remote_url else None,
                 "date_dt": dt,
             },
-            allowed_final_list,
+            allowed_usernames=allowed_final
         )
 
-        if youtube_mode == "audio" and music_original_url:
+        # Si on a demandé YT audio -> on lance le job maintenant
+        if music_original_url and _is_youtube(music_original_url) and not music_url:
             job_id = jobs.enqueue_yt_audio(text_id, music_original_url)
             _yt_map_set(text_id, job_id)
 
@@ -361,119 +422,165 @@ def new_text():
     return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
 
+
 @texts_bp.route("/texts/<int:text_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_text(text_id: int):
-    if not getattr(current_user, "is_admin", False):
-        from flask import abort
-        abort(403)
-
+    # Seul l’auteur peut modifier
     t = store.get_text_dict(text_id)
     if not t:
-        from flask import abort
-        abort(404)
+        from flask import abort; abort(404)
+    me = (current_user.get_id() or "").strip().lower()
+    author = (t.get("created_by") or "").strip().lower()
+    if me != author:
+        from flask import abort; abort(403)
 
-    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in store.list_users() if u["username"].strip().lower() != admin_name.strip().lower()]
-
-    if request.method == "POST":
-        if request.content_length and request.content_length > MAX_UPLOAD_MB * 1024 * 1024:
-            flash(f"Fichier trop volumineux (> {MAX_UPLOAD_MB} Mo).")
-            vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
-            return render_template("text_form.html", is_new=False, users=usernames, text=vm)
-
-        title = _clean_opt(request.form.get("title"))
-        body = request.form.get("body")
-        context_val = _clean_opt(request.form.get("context"))
-        music_url = _clean_opt(request.form.get("music_url"))
-        image_remote_url = _clean_opt(request.form.get("image_url"))
-        youtube_audio = (request.form.get("youtube_audio") == "1")
-        date_str = (request.form.get("date") or "").strip()
-        allowed = request.form.getlist("allowed_users")
-
-        if not body:
-            flash("Le texte est requis.")
-            vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
-            return render_template("text_form.html", is_new=False, users=usernames, text=vm)
-
-        # Date
-        date_dt = None
-        if date_str:
+    # GET -> préremplissage avec déchiffrement
+    if request.method == "GET":
+        # déchiffre pour le formulaire
+        import crypto_server as cserv
+        title, body, context = t.get("title"), t.get("body"), t.get("context")
+        if t.get("ciphertext") and t.get("cipher_nonce"):
             try:
-                date_dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M")
-            except ValueError:
-                flash("Format de date invalide.")
+                clear = cserv.decrypt_text_payload(t["created_by"], t["ciphertext"], t["cipher_nonce"])
+                title = clear.get("title") or title
+                body = clear.get("body")
+                context = clear.get("context")
+            except Exception:
+                pass
 
-        # Image upload
-        img_fs = request.files.get("image_file")
-        new_img = None
-        if img_fs and img_fs.filename:
-            new_img = _save_upload(img_fs, ALLOWED_IMAGE_EXTS)
+        vm = dict(t)
+        vm["title"] = title or ""
+        vm["body"] = body or ""
+        vm["context"] = context or ""
+        vm["date_dt"] = datetime.fromisoformat(t["date"]) if t.get("date") else datetime.utcnow()
 
-        # Musique
-        mus_fs = request.files.get("music_file")
-        data_update = {
-            "title": title,
-            "body": body,
-            "context": context_val,
-        }
-
-        if date_dt:
-            data_update["date_dt"] = date_dt
-
-        if new_img:
-            data_update["image_filename"] = new_img
-            data_update["image_url"] = None
+        # Valeur à afficher dans le champ URL musique (si c’est une URL distante)
+        mv = ""
+        if t.get("music_original_url"):
+            mv = t["music_original_url"]
         else:
-            if image_remote_url and not t.get("image_filename"):
-                data_update["image_url"] = image_remote_url
-                if not t.get("image_original_url"):
-                    data_update["image_original_url"] = image_remote_url
+            u = t.get("music_url")
+            if u and not str(u).startswith("/uploads/"):
+                mv = u
+        vm["music_input_value"] = mv
 
-        if mus_fs and mus_fs.filename:
-            mname = _save_upload(mus_fs, ALLOWED_AUDIO_EXTS)
-            data_update["music_url"] = f"/uploads/{mname}"
-            data_update["music_original_url"] = None
-            # stoppe un éventuel suivi de job
-            _yt_map_set(text_id, "")  # vide le mapping
+        # Le switch "YouTube audio" est coché si audio en extraction (original YouTube + pas de fichier local)
+        vm["youtube_audio_checked"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
+
+        # Permissions possibles
+        admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
+        usernames = [u["username"] for u in store.list_users()
+                     if u["username"].strip().lower() != admin_name.strip().lower()]
+        return render_template("text_form.html", is_new=False, users=usernames, text=vm)
+
+    # POST -> mise à jour
+    # Champs texte
+    title = _clean_opt(request.form.get("title"))
+    body = request.form.get("body")
+    context_val = _clean_opt(request.form.get("context"))
+    if not body:
+        flash("Le texte est requis.")
+        # Rejoue le GET pour préremplir
+        return redirect(url_for("texts.edit_text", text_id=text_id))
+
+    # Date
+    date_str = (request.form.get("date") or "").strip()
+    dt = None
+    if date_str:
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M")
+        except ValueError:
+            flash("Format de date invalide.")
+            return redirect(url_for("texts.edit_text", text_id=text_id))
+
+    # Images
+    img_fs = request.files.get("image_file")
+    image_remote_url = _clean_opt(request.form.get("image_url"))
+
+    new_image_filename = t.get("image_filename")
+    new_image_url = t.get("image_url")
+    new_image_original_url = t.get("image_original_url")
+
+    if img_fs and img_fs.filename:
+        nm = _save_upload(img_fs, ALLOWED_IMAGE_EXTS)
+        if nm:
+            new_image_filename = nm
+            new_image_url = None
+    elif image_remote_url:
+        # si pas de fichier local, on peut mettre/mettre à jour une URL distante
+        if not new_image_filename:
+            new_image_url = image_remote_url
+            if not new_image_original_url:
+                new_image_original_url = image_remote_url
+
+    # Musique
+    mus_fs = request.files.get("music_file")
+    link = _clean_opt(request.form.get("music_url"))
+    want_yt_audio = (request.form.get("youtube_audio") == "1")
+
+    old_music_url = t.get("music_url")
+    old_music_original = t.get("music_original_url")
+
+    new_music_url = old_music_url
+    new_music_original = old_music_original
+
+    if mus_fs and mus_fs.filename:
+        mname = _save_upload(mus_fs, ALLOWED_AUDIO_EXTS)
+        if mname:
+            new_music_url = f"/uploads/{mname}"
+            new_music_original = None
+    elif link is not None:
+        # input fourni (peut être vide pour "clear" -> on garde l'ancien si vide)
+        if link == "":
+            pass  # ne rien changer si champ vidé
         else:
-            if music_url:
-                if _is_youtube(music_url) and youtube_audio:
-                    data_update["music_original_url"] = music_url
-                    data_update["music_url"] = None
-                    job_id = jobs.enqueue_yt_audio(text_id, music_url)
-                    _yt_map_set(text_id, job_id)
-                elif _is_youtube(music_url):
-                    data_update["music_url"] = music_url
-                    data_update["music_original_url"] = None
-                    _yt_map_set(text_id, "")  # plus de job
+            if _is_youtube(link):
+                if want_yt_audio:
+                    new_music_url = None
+                    new_music_original = link
                 else:
-                    data_update["music_url"] = music_url
-                    data_update["music_original_url"] = None
-                    _yt_map_set(text_id, "")  # plus de job
+                    new_music_url = link
+                    new_music_original = None
+            else:
+                new_music_url = link
+                new_music_original = None
 
-        # Permissions
-        allow_final = [u for u in allowed if u in usernames and u.strip().lower() != admin_name.strip().lower()]
+    # Permissions
+    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
+    usernames = [u["username"] for u in store.list_users()
+                 if u["username"].strip().lower() != admin_name.strip().lower()]
+    allowed = request.form.getlist("allowed_users")
+    allowed_final = [u for u in allowed if
+                     u in usernames and u.strip().lower() != admin_name.strip().lower()]
 
-        clear = {"title": title, "body": body, "context": context_val}
-        enc = cserv.encrypt_text_payload(t["created_by"], clear)
+    # Chiffrement (re-écrit toujours la version claire)
+    import crypto_server as cserv
+    clear = {"title": title, "body": body, "context": context_val}
+    enc = cserv.encrypt_text_payload(t["created_by"], clear)
 
-        data_update.update({
-            "cipher_alg": enc["cipher_alg"],
-            "ciphertext": enc["ciphertext"],
-            "cipher_nonce": enc["cipher_nonce"],
-        })
-        store.update_text(text_id, data_update, allow_final)
+    # Mise à jour SQL
+    payload = {
+        "cipher_alg": enc["cipher_alg"],
+        "ciphertext": enc["ciphertext"],
+        "cipher_nonce": enc["cipher_nonce"],
+        "music_url": new_music_url,
+        "music_original_url": new_music_original,
+        "image_filename": new_image_filename,
+        "image_url": new_image_url,
+        "image_original_url": new_image_original_url,
+    }
+    if dt:
+        payload["date_dt"] = dt
+    store.update_text(text_id, payload, allowed_final)
 
-        # SQL update
-        store.update_text(text_id, data_update, allow_final)
+    # (Ré)lancer job YT si on est en mode audio (original youtube + pas de fichier local)
+    if new_music_original and _is_youtube(new_music_original) and not new_music_url:
+        job_id = jobs.enqueue_yt_audio(text_id, new_music_original)
+        _yt_map_set(text_id, job_id)
 
-        flash("Texte mis à jour.")
-        return redirect(url_for("texts.view_text", text_id=text_id))
-
-    vm = dict(t, date_dt=datetime.fromisoformat(t["date"]))
-    vm["yt_job_id"] = _yt_map_get(text_id)
-    return render_template("text_form.html", is_new=False, users=usernames, text=vm)
+    flash("Texte mis à jour.")
+    return redirect(url_for("texts.view_text", text_id=text_id))
 
 @texts_bp.route("/texts/<int:text_id>/delete", methods=["POST"])
 @login_required
@@ -502,40 +609,46 @@ def delete_text(text_id: int):
 @login_required
 def job_status(job_id: str):
     j = jobs.get_job(job_id)
-    if not j:
-        return jsonify({"state": "unknown"}), 404
-    return jsonify({
-        "id": j["id"],
-        "state": j["state"],
-        "progress": j["progress"],
-        "message": j.get("message", "")
-    })
+    if j:
+        return jsonify({
+            "id": j["id"], "state": j["state"],
+            "progress": j["progress"], "message": j.get("message","")
+        })
+    # pas en mémoire -> peut-être redémarrage : retrouve le texte
+    tid = _yt_map_find_text_id(job_id)
+    if tid:
+        t = store.get_text_dict(tid)
+        # si extraction toujours nécessaire (YT original présent, pas de fichier local)
+        if t and _is_youtube(t.get("music_original_url")) and not t.get("music_url"):
+            return jsonify({"id": job_id, "state": "missing", "progress": 0,
+                            "message": "Service relancé — cliquez Relancer"}), 200
+    return jsonify({"state": "unknown"}), 404
 
+
+def _is_owner(text_id:int) -> bool:
+    t = store.get_text_dict(text_id)
+    return bool(t and (t.get("created_by") or "").strip().lower() == (current_user.get_id() or "").strip().lower())
 
 @texts_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
 @login_required
 def job_cancel(job_id: str):
-    if not getattr(current_user, "is_admin", False):
-        return jsonify({"error": "forbidden"}), 403
+    tid = _yt_map_find_text_id(job_id)
+    if not (getattr(current_user, "is_admin", False) or (tid and _is_owner(tid))):
+        return jsonify({"error":"forbidden"}), 403
     ok = jobs.cancel_job(job_id)
     return jsonify({"ok": bool(ok)}), (200 if ok else 404)
-
 
 @texts_bp.route("/jobs/<job_id>/retry", methods=["POST"])
 @login_required
 def job_retry(job_id: str):
-    if not getattr(current_user, "is_admin", False):
-        return jsonify({"error": "forbidden"}), 403
-
-    # Retrouve le text_id depuis le mapping JSON
-    text_id = _yt_map_find_text_id(job_id)
-    if not text_id:
-        return jsonify({"error": "unknown_text"}), 404
-
-    new_id = jobs.retry_job(job_id)
-    if not new_id:
-        return jsonify({"error": "unknown_job"}), 404
-
-    # Met à jour le mapping
-    _yt_map_set(text_id, new_id)
+    tid = _yt_map_find_text_id(job_id)
+    if not (tid and (getattr(current_user, "is_admin", False) or _is_owner(tid))):
+        return jsonify({"error":"forbidden"}), 403
+    t = store.get_text_dict(tid)
+    if not t: return jsonify({"error":"unknown_text"}), 404
+    # relance propre à partir de l'URL originale
+    if not (_is_youtube(t.get("music_original_url")) and not t.get("music_url")):
+        return jsonify({"error":"no_pending"}), 400
+    new_id = jobs.enqueue_yt_audio(tid, t["music_original_url"])
+    _yt_map_set(tid, new_id)
     return jsonify({"ok": True, "job_id": new_id})

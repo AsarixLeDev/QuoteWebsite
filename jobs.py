@@ -2,7 +2,8 @@ from __future__ import annotations
 import os, re, time, threading, secrets, traceback
 from queue import Queue
 from typing import Dict, Any, Optional
-import yt_dlp  # pip install yt-dlp
+from storage import read_db, get_conf
+import yt_dlp
 
 from paths import UPLOAD_DIR
 import storage_sql as store
@@ -68,46 +69,96 @@ def _progress_hook(job_id: str):
             _set(job_id, state="running", progress=100, message="finalisation…")
     return hook
 
+
+def _cookief():
+    try:
+        conf = get_conf(read_db())
+        path = ((conf.get("yt") or {}).get("cookies_path")) or ""
+        return path if (path and os.path.isfile(path)) else None
+    except Exception:
+        return None
+
+# ... au-dessus : _cookief(), _progress_hook(), etc.
+
 def _do_yt_audio(job: Dict[str, Any]):
-    job_id = job["id"]; text_id = int(job["text_id"]); url = job["url"]
+    job_id  = job["id"]
+    text_id = int(job["text_id"])
+    url     = job["url"]
+
     token = secrets.token_urlsafe(16)
     out_tmpl = str(UPLOAD_DIR / (token + ".%(ext)s"))
+
+    # premier essai : m4a si dispo, sinon bestaudio; client android (contourne parfois age-restrictions)
     ydl_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
-        "outtmpl": out_tmpl, "noplaylist": True,
-        "quiet": True, "no_warnings": True,
+        "outtmpl": out_tmpl,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": ["android"]}},
         "progress_hooks": [_progress_hook(job_id)],
     }
+    ck = _cookief()
+    if ck:
+        ydl_opts["cookiefile"] = ck
+
+    def _run_with(opts):
+        with yt_dlp.YoutubeDL(opts) as y:
+            info = y.extract_info(url, download=True)
+            return y.prepare_filename(info)
+
     try:
         _set(job_id, state="running", progress=0, message="préparation…")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
+        try:
+            file_path = _run_with(ydl_opts)
+        except yt_dlp.utils.DownloadError as e1:
+            # fallback 1 : format plus générique, sans client android
+            if "Requested format is not available" in str(e1):
+                opts2 = dict(ydl_opts)
+                opts2.pop("extractor_args", None)
+                opts2["format"] = "bestaudio/best"
+                file_path = _run_with(opts2)
+            else:
+                raise
+
         if not file_path or not os.path.exists(file_path):
             _set(job_id, state="error", message="fichier final introuvable"); return
+
         # annulation juste après DL
         if (_get(job_id) or {}).get("cancel"):
             _set(job_id, state="cancelled", message="annulé")
             try: os.remove(file_path)
             except Exception: pass
             return
+
         rel_name = os.path.basename(file_path)
 
         # MAJ SQL: music_url local + original
-        store.update_text(text_id, {"music_url": f"/uploads/{rel_name}", "music_original_url": url}, allowed_usernames=None)
+        store.update_text(text_id, {
+            "music_url": f"/uploads/{rel_name}",
+            "music_original_url": url
+        }, allowed_usernames=None)
 
-        # nettoie le mapping job->texte dans data.json (progress bar)
+        # nettoie le mapping job->texte dans data.json (pour la barre)
         try:
-            db=read_db()
-            yt=db.get("jobs",{}).get("yt",{})
-            if yt and str(text_id) in yt: yt[str(text_id)]=""
-            write_db(db)
-        except Exception: pass
+            db = read_db()
+            yt = db.get("jobs", {}).get("yt", {})
+            if yt and str(text_id) in yt:
+                yt[str(text_id)] = ""
+                write_db(db)
+        except Exception:
+            pass
 
         _set(job_id, state="done", progress=100, message="terminé")
+
+    except yt_dlp.utils.DownloadError as e:
+        msg = "YouTube : format audio indisponible."
+        if "Sign in to confirm you’re not a bot" in str(e):
+            msg = "YouTube : connexion requise (ajoute un cookies.txt dans config.yt.cookies_path)."
+        _set(job_id, state="error", message=msg)
     except Exception as e:
-        traceback.print_exc()
         _set(job_id, state="error", message=str(e) or "échec extraction")
+
 
 def _worker_loop():
     while True:

@@ -6,6 +6,12 @@
     <title>{{ site_name }}</title>
     <link href="{{ url_for('static', filename='styles.css') }}" rel="stylesheet">
 </head>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  // volume par défaut pour tous les <audio>
+  document.querySelectorAll('audio').forEach(a => { try{ a.volume = 0.2; }catch(e){} });
+});
+</script>
 <body>
 
 <nav class="nav">
@@ -51,8 +57,9 @@
         </span>
 
         <a class="btn-nav" href="{{ url_for('core.dashboard') }}">Backboard</a>
-        {% if current_user.is_admin %}
+
           <a class="btn-nav" href="{{ url_for('texts.new_text') }}">Nouveau texte</a>
+        {% if current_user.is_admin %}
           <a class="btn-nav" href="{{ url_for('core.admin_import') }}">Importer</a>
           <a class="btn-nav" href="{{ url_for('core.admin_backup') }}">Télécharger backup</a>
         {% endif %}

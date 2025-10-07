@@ -7,68 +7,43 @@
   <div class="form-row">
     <div>
       <label for="title">Titre (optionnel)</label>
-      <input
-        class="input"
-        id="title"
-        name="title"
-        type="text"
-        value="{{ (text.title or '') if text else '' }}"
-        placeholder="(sans titre)">
+      <input class="input" id="title" name="title" type="text"
+             value="{{ (text.title or '') if text else '' }}" placeholder="(sans titre)">
     </div>
     <div>
       <label for="date">Date</label>
-      <input
-        class="input"
-        id="date"
-        name="date"
-        type="datetime-local"
-        value="{{ text.date_dt.strftime('%Y-%m-%dT%H:%M') if text else '' }}">
+      <input class="input" id="date" name="date" type="datetime-local"
+             value="{{ text.date_dt.strftime('%Y-%m-%dT%H:%M') if text and text.date_dt else '' }}">
       <div class="text-muted" style="margin-top:4px;">Laisse vide pour utiliser la date actuelle.</div>
     </div>
   </div>
 
   <!-- Contexte -->
   <label for="context" style="margin-top:10px;">Contexte (optionnel)</label>
-  <textarea
-    class="textarea"
-    id="context"
-    name="context"
-    rows="3"
-    placeholder="Contexte…">{{ (text.context or '') if text else '' }}</textarea>
+  <textarea class="textarea" id="context" name="context" rows="3"
+            placeholder="Contexte…">{{ (text.context or '') if text else '' }}</textarea>
 
   <!-- Corps -->
   <label for="body" style="margin-top:10px;">Texte *</label>
-  <textarea
-    class="textarea"
-    id="body"
-    name="body"
-    rows="10"
-    required
-    placeholder="Écris ici…">{{ (text.body or '') if text else '' }}</textarea>
+  <textarea class="textarea" id="body" name="body" rows="10" required
+            placeholder="Écris ici…">{{ (text.body or '') if text else '' }}</textarea>
 
   <!-- Musique -->
   <div class="form-row" style="margin-top:10px;">
     <div>
       <label for="music_url">Musique — URL (optionnel) ou importer un fichier</label>
-      <input
-        class="input"
-        type="text"
-        id="music_url"
-        name="music_url"
-        inputmode="url"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-        value="{{ (text.music_original_url or text.music_url or '') if text else '' }}"
-        placeholder="https://… (Spotify/YouTube/Deezer/Apple Music/MP3) ou /uploads/xxxx.mp3"
-        pattern="^(https?://|/uploads/).*$"
-        title="Entre une URL http(s) valide ou un chemin local /uploads/…">
+      <input class="input" type="text" id="music_url" name="music_url"
+             inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+             value="{{ (text.music_input_value or text.music_original_url or text.music_url or '') if text else '' }}"
+             placeholder="https://… (Spotify/YouTube/Deezer/Apple Music/MP3) ou /uploads/xxxx.mp3"
+             pattern="^(https?://|/uploads/).*$"
+             title="Entre une URL http(s) valide ou un chemin local /uploads/…">
 
-      <!-- Switch YouTube Audio/Vidéo : visible seulement si lien YouTube -->
+      <!-- Switch YouTube audio (extraction) : visible seulement si lien YouTube -->
       <div id="yt-switch" style="display:none; margin-top:8px;">
         <label class="switch">
           <input type="checkbox" id="youtube_audio" name="youtube_audio" value="1"
-                 {% if text and text.youtube_mode=='audio' %}checked{% endif %}>
+                 {% if text and (text.youtube_audio_checked or text.youtube_mode=='audio') %}checked{% endif %}>
           <span class="switch-label">Audio uniquement (YouTube)</span>
         </label>
         <div class="text-muted" style="margin-top:4px;">
@@ -99,14 +74,9 @@
     </div>
     <div>
       <label for="image_url">Image (optionnelle — URL)</label>
-      <input
-        class="input"
-        type="text"
-        id="image_url"
-        name="image_url"
-        inputmode="url"
-        value="{{ (text.image_url or '') if text else '' }}"
-        placeholder="https://… (si pas d’upload)">
+      <input class="input" type="text" id="image_url" name="image_url" inputmode="url"
+             value="{{ (text.image_url or '') if text else '' }}"
+             placeholder="https://… (si pas d’upload)">
     </div>
   </div>
 
@@ -119,11 +89,8 @@
       <div class="chip-group">
         {% for uname in users %}
           <label class="checkbox-pill">
-            <input
-              type="checkbox"
-              name="allowed_users"
-              value="{{ uname }}"
-              {% if text and text.allowed_usernames and uname in text.allowed_usernames %}checked{% endif %}>
+            <input type="checkbox" name="allowed_users" value="{{ uname }}"
+                   {% if text and text.allowed_usernames and uname in text.allowed_usernames %}checked{% endif %}>
             <span>{{ uname }}</span>
           </label>
         {% endfor %}
@@ -149,19 +116,14 @@
   const box = document.getElementById('yt-switch');
   const chk = document.getElementById('youtube_audio');
 
-  function isYT(u){
-    if(!u) return false;
-    const s = String(u).trim();
-    return /(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)/i.test(s);
-  }
+  function isYT(u){ return /(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)/i.test((u||'').trim()); }
   function refresh(){
     const show = isYT(input.value);
     box.style.display = show ? 'block' : 'none';
     if(!show && chk) chk.checked = false;
   }
-  input.addEventListener('input', refresh);
+  if(input){ input.addEventListener('input', refresh); }
   document.addEventListener('DOMContentLoaded', refresh);
-  refresh();
 })();
 </script>
 {% endblock %}
