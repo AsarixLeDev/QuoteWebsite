@@ -277,14 +277,9 @@ def view_text(text_id: int):
         abort(404)
 
     # Permissions
-    if not getattr(current_user, "is_admin", False):
-        me = (current_user.get_id() or "").strip().lower()
-        author = (t.get("created_by") or "").strip().lower()
-        is_owner = (me == author)
-        is_allowed = current_user.get_id() in (t.get("allowed_usernames") or [])
-        if not (is_owner or is_allowed):
-            from flask import abort
-            abort(403)
+    if not store.can_user_view_text(current_user.get_id(), text_id):
+        from flask import abort
+        abort(403)
 
     # VM
     vm = dict(t)
@@ -310,11 +305,12 @@ def view_text(text_id: int):
     vm["context"] = context
 
     # embed / widget: priorité au fichier local; si YT audio en cours => widget
-    vm["embed"] = _compute_embed_for_view(t)
+    yt_job_id = _yt_map_get(int(t["id"]))
+    vm["yt_job_id"] = yt_job_id
+    vm["yt_audio_pending"] = bool(yt_job_id and _is_youtube(t.get("music_original_url")) and not t.get("music_url"))
 
-    # job id (si extraction YT en cours)
-    vm["yt_job_id"] = _yt_map_get(int(t["id"]))  # pour le polling
-    vm["yt_audio_pending"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
+    # embed: si pas de job actif -> on montre l'embed normal (YouTube ou audio local)
+    vm["embed"] = _detect_embed(t.get("music_url") or t.get("music_original_url"))
 
     # état spotify (si tu l’utilises)
     try:
@@ -328,16 +324,26 @@ def view_text(text_id: int):
 @texts_bp.route("/texts/new", methods=["GET", "POST"])
 @login_required
 def new_text():
-    # Tous les utilisateurs peuvent créer
-    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in store.list_users()
-                 if u["username"].strip().lower() != admin_name.strip().lower()]
+    """
+    Création d'un texte.
+    - Tout utilisateur connecté peut créer
+    - Suggestions de permissions = uniquement mes amis acceptés
+    - Option "Public (amis)" -> default_allow=True
+    - YouTube: si "Audio YouTube" coché et URL YT -> job d'extraction (pas d'embed)
+    """
+    # Suggestions : uniquement les amis acceptés (sans moi-même)
+    friends = store.list_friendship(current_user.get_id())
+    usernames = sorted(friends.get("accepted", []))
+    me = (current_user.get_id() or "").strip().lower()
+    usernames = [u for u in usernames if u.strip().lower() != me]
 
     if request.method == "POST":
+        # limite de taille requête
         if request.content_length and request.content_length > MAX_UPLOAD_MB * 1024 * 1024:
             flash(f"Fichier trop volumineux (> {MAX_UPLOAD_MB} Mo).")
             return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
+        # champs texte
         title = _clean_opt(request.form.get("title"))
         body = request.form.get("body")
         context_val = _clean_opt(request.form.get("context"))
@@ -345,7 +351,7 @@ def new_text():
             flash("Le texte est requis.")
             return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
-        # Date
+        # date
         date_str = (request.form.get("date") or "").strip()
         dt = datetime.utcnow()
         if date_str:
@@ -355,18 +361,18 @@ def new_text():
                 flash("Format de date invalide.")
                 return render_template("text_form.html", is_new=True, users=usernames, text=None)
 
-        # Image
+        # image
         img_fs = request.files.get("image_file")
-        img_name = _save_upload(img_fs, ALLOWED_IMAGE_EXTS) if img_fs and img_fs.filename else None
+        img_name = _save_upload(img_fs, ALLOWED_IMAGE_EXTS) if (img_fs and img_fs.filename) else None
         image_remote_url = _clean_opt(request.form.get("image_url"))
 
-        # Musique
+        # musique
         mus_fs = request.files.get("music_file")
         link = _clean_opt(request.form.get("music_url"))
         want_yt_audio = (request.form.get("youtube_audio") == "1")
 
-        music_url = None              # ce qui sera lu par l'embed audio local SI présent
-        music_original_url = None     # on garde l'URL d'origine (YouTube / autre)
+        music_url = None              # fichier local ou URL directe à lire
+        music_original_url = None     # source d'origine (YouTube/Spotify/...)
 
         if mus_fs and mus_fs.filename:
             mname = _save_upload(mus_fs, ALLOWED_AUDIO_EXTS)
@@ -375,20 +381,22 @@ def new_text():
         elif link:
             if _is_youtube(link):
                 if want_yt_audio:
-                    # Extraction audio -> pas d'embed vidéo : on laisse music_url=None et on garde l'original
+                    # extraction audio -> on garde seulement l'original pour le widget
                     music_original_url = link
                 else:
-                    # Mode vidéo : on embarque YouTube directement
                     music_url = link
             else:
                 music_url = link
 
-        # Permissions
-        allowed = request.form.getlist("allowed_users")
-        allowed_final = [u for u in allowed if
-                         u in usernames and u.strip().lower() != admin_name.strip().lower()]
+        # "Public (amis)" : accepter is_public OU (compat) default_allow
+        is_public = (request.form.get("is_public") == "1") or (request.form.get("default_allow") == "1")
 
-        # Chiffrement (titre/corps/contexte) – on suppose crypto_server importé en haut
+        # Permissions (sécurité : filtrer aux seuls amis)
+        allowed_raw = request.form.getlist("allowed_users")
+        friends_set = set(usernames)
+        allowed_final = [u for u in allowed_raw if u in friends_set]
+
+        # Chiffrement (titre/corps/contexte)
         import crypto_server as cserv
         clear = {"title": title, "body": body, "context": context_val}
         enc = cserv.encrypt_text_payload(current_user.get_id(), clear)
@@ -400,7 +408,7 @@ def new_text():
                 "cipher_alg": enc["cipher_alg"],
                 "ciphertext": enc["ciphertext"],
                 "cipher_nonce": enc["cipher_nonce"],
-                "default_allow": (request.form.get("default_allow") == "1"),
+                "default_allow": bool(is_public),
                 "music_url": music_url,
                 "music_original_url": music_original_url,
                 "image_filename": img_name,
@@ -411,7 +419,7 @@ def new_text():
             allowed_usernames=allowed_final
         )
 
-        # Si on a demandé YT audio -> on lance le job maintenant
+        # Job YT si demandé (original YT + pas de fichier local)
         if music_original_url and _is_youtube(music_original_url) and not music_url:
             job_id = jobs.enqueue_yt_audio(text_id, music_original_url)
             _yt_map_set(text_id, job_id)
@@ -419,25 +427,33 @@ def new_text():
         flash("Texte créé.")
         return redirect(url_for("texts.view_text", text_id=text_id))
 
+    # GET
     return render_template("text_form.html", is_new=True, users=usernames, text=None)
+
 
 
 
 @texts_bp.route("/texts/<int:text_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_text(text_id: int):
-    # Seul l’auteur peut modifier
+    """
+    Édition d'un texte.
+    - Seul l'auteur peut éditer
+    - Préremplissage avec les données déchiffrées
+    - YouTube: si "Audio YouTube" coché, bascule en extraction (widget)
+    - "Public (amis)" -> default_allow
+    """
     t = store.get_text_dict(text_id)
     if not t:
         from flask import abort; abort(404)
+
     me = (current_user.get_id() or "").strip().lower()
     author = (t.get("created_by") or "").strip().lower()
     if me != author:
         from flask import abort; abort(403)
 
-    # GET -> préremplissage avec déchiffrement
+    # GET -> préremplissage
     if request.method == "GET":
-        # déchiffre pour le formulaire
         import crypto_server as cserv
         title, body, context = t.get("title"), t.get("body"), t.get("context")
         if t.get("ciphertext") and t.get("cipher_nonce"):
@@ -454,8 +470,7 @@ def edit_text(text_id: int):
         vm["body"] = body or ""
         vm["context"] = context or ""
         vm["date_dt"] = datetime.fromisoformat(t["date"]) if t.get("date") else datetime.utcnow()
-
-        # Valeur à afficher dans le champ URL musique (si c’est une URL distante)
+        # champ URL musique
         mv = ""
         if t.get("music_original_url"):
             mv = t["music_original_url"]
@@ -464,27 +479,25 @@ def edit_text(text_id: int):
             if u and not str(u).startswith("/uploads/"):
                 mv = u
         vm["music_input_value"] = mv
-
-        # Le switch "YouTube audio" est coché si audio en extraction (original YouTube + pas de fichier local)
+        vm["is_public"] = bool(t.get("default_allow"))
         vm["youtube_audio_checked"] = bool(_is_youtube(t.get("music_original_url")) and not t.get("music_url"))
 
-        # Permissions possibles
-        admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-        usernames = [u["username"] for u in store.list_users()
-                     if u["username"].strip().lower() != admin_name.strip().lower()]
+        # suggestions = amis acceptés (sans moi)
+        friends = store.list_friendship(current_user.get_id())
+        usernames = sorted(friends.get("accepted", []))
+        me_u = (current_user.get_id() or "").strip().lower()
+        usernames = [u for u in usernames if u.strip().lower() != me_u]
         return render_template("text_form.html", is_new=False, users=usernames, text=vm)
 
     # POST -> mise à jour
-    # Champs texte
     title = _clean_opt(request.form.get("title"))
     body = request.form.get("body")
     context_val = _clean_opt(request.form.get("context"))
     if not body:
         flash("Le texte est requis.")
-        # Rejoue le GET pour préremplir
         return redirect(url_for("texts.edit_text", text_id=text_id))
 
-    # Date
+    # date
     date_str = (request.form.get("date") or "").strip()
     dt = None
     if date_str:
@@ -494,7 +507,7 @@ def edit_text(text_id: int):
             flash("Format de date invalide.")
             return redirect(url_for("texts.edit_text", text_id=text_id))
 
-    # Images
+    # images
     img_fs = request.files.get("image_file")
     image_remote_url = _clean_opt(request.form.get("image_url"))
 
@@ -508,13 +521,12 @@ def edit_text(text_id: int):
             new_image_filename = nm
             new_image_url = None
     elif image_remote_url:
-        # si pas de fichier local, on peut mettre/mettre à jour une URL distante
         if not new_image_filename:
             new_image_url = image_remote_url
             if not new_image_original_url:
                 new_image_original_url = image_remote_url
 
-    # Musique
+    # musique
     mus_fs = request.files.get("music_file")
     link = _clean_opt(request.form.get("music_url"))
     want_yt_audio = (request.form.get("youtube_audio") == "1")
@@ -531,9 +543,9 @@ def edit_text(text_id: int):
             new_music_url = f"/uploads/{mname}"
             new_music_original = None
     elif link is not None:
-        # input fourni (peut être vide pour "clear" -> on garde l'ancien si vide)
+        # champ fourni (vide = ne rien changer)
         if link == "":
-            pass  # ne rien changer si champ vidé
+            pass
         else:
             if _is_youtube(link):
                 if want_yt_audio:
@@ -546,24 +558,25 @@ def edit_text(text_id: int):
                 new_music_url = link
                 new_music_original = None
 
-    # Permissions
-    admin_name = (get_conf(read_db()).get("admin", {}) or {}).get("username", "admin")
-    usernames = [u["username"] for u in store.list_users()
-                 if u["username"].strip().lower() != admin_name.strip().lower()]
-    allowed = request.form.getlist("allowed_users")
-    allowed_final = [u for u in allowed if
-                     u in usernames and u.strip().lower() != admin_name.strip().lower()]
+    # "Public (amis)"
+    is_public = (request.form.get("is_public") == "1") or (request.form.get("default_allow") == "1")
 
-    # Chiffrement (re-écrit toujours la version claire)
+    # permissions (amis uniquement)
+    allowed_raw = request.form.getlist("allowed_users")
+    friends = store.list_friendship(current_user.get_id())
+    friends_set = set(friends.get("accepted", []))
+    allowed_final = [u for u in allowed_raw if u in friends_set]
+
+    # chiffrement
     import crypto_server as cserv
     clear = {"title": title, "body": body, "context": context_val}
     enc = cserv.encrypt_text_payload(t["created_by"], clear)
 
-    # Mise à jour SQL
     payload = {
         "cipher_alg": enc["cipher_alg"],
         "ciphertext": enc["ciphertext"],
         "cipher_nonce": enc["cipher_nonce"],
+        "default_allow": bool(is_public),
         "music_url": new_music_url,
         "music_original_url": new_music_original,
         "image_filename": new_image_filename,
@@ -572,15 +585,17 @@ def edit_text(text_id: int):
     }
     if dt:
         payload["date_dt"] = dt
+
     store.update_text(text_id, payload, allowed_final)
 
-    # (Ré)lancer job YT si on est en mode audio (original youtube + pas de fichier local)
+    # (ré)lancer job YT si nécessaire
     if new_music_original and _is_youtube(new_music_original) and not new_music_url:
         job_id = jobs.enqueue_yt_audio(text_id, new_music_original)
         _yt_map_set(text_id, job_id)
 
     flash("Texte mis à jour.")
     return redirect(url_for("texts.view_text", text_id=text_id))
+
 
 @texts_bp.route("/texts/<int:text_id>/delete", methods=["POST"])
 @login_required

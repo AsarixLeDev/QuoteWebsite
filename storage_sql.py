@@ -112,6 +112,92 @@ class Friend(Base):
     friend_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     created_at:     Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+# --- helpers d'accès amis -----------------------------------------------------
+def _get_user_by_name(s, username: str):
+    return s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower()))
+
+def are_friends(s, uid1: int, uid2: int) -> bool:
+    """
+    True si une relation d'amitié existe dans un sens ou dans l'autre.
+    (on accepte 1 seule ligne, pas besoin d'avoir la paire)
+    """
+    FriendTbl = globals().get("Friend")
+    FriendReq = globals().get("FriendRequest")
+    if FriendTbl:
+        a = s.scalar(select(FriendTbl).where(FriendTbl.user_id == uid1, FriendTbl.friend_user_id == uid2))
+        b = s.scalar(select(FriendTbl).where(FriendTbl.user_id == uid2, FriendTbl.friend_user_id == uid1))
+        if a or b:
+            return True
+    if FriendReq:
+        ar = s.scalar(select(FriendReq).where(FriendReq.from_user_id == uid1, FriendReq.to_user_id == uid2, FriendReq.status == "accepted"))
+        br = s.scalar(select(FriendReq).where(FriendReq.from_user_id == uid2, FriendReq.to_user_id == uid1, FriendReq.status == "accepted"))
+        if ar or br:
+            return True
+    return False
+
+def can_user_view_text(username: str, text_id: int) -> bool:
+    """Auteur OU explicitement autorisé OU (default_allow & amis)."""
+    with SessionLocal() as s:
+        u = _get_user_by_name(s, username)
+        if not u:
+            return False
+        t = s.get(Text, text_id)
+        if not t:
+            return False
+        if t.created_by_id == u.id:
+            return True
+        # autorisé explicitement ?
+        seen = s.execute(sa.select(text_access.c.text_id)
+                         .where(text_access.c.text_id == text_id,
+                                text_access.c.user_id == u.id)).first()
+        if seen:
+            return True
+        # public (amis)
+        if t.default_allow and are_friends(s, u.id, t.created_by_id):
+            return True
+        return False
+
+def list_texts_accessible(username: str) -> list[dict]:
+    """Textes créés par l’utilisateur + textes explicitement partagés + textes amis ‘public’."""
+    with SessionLocal() as s:
+        u = _get_user_by_name(s, username)
+        if not u: return []
+        # 1) mes textes
+        own_q = select(Text).where(Text.created_by_id==u.id)
+        own = s.scalars(own_q).all()
+        # 2) explicitement partagés
+        shared_q = select(Text).join(text_access, text_access.c.text_id==Text.id)\
+                               .where(text_access.c.user_id==u.id)
+        shared = s.scalars(shared_q).all()
+        # 3) amis ‘public’
+
+        friends_ids = select(Friend.friend_user_id).where(Friend.user_id==u.id)
+        public_q = select(Text).where(Text.created_by_id.in_(friends_ids),
+                                      Text.default_allow.is_(True))
+        public = s.scalars(public_q).all()
+
+        rows = {t.id: t for t in (own + shared + public)}.values()
+        out=[]
+        for t in rows:
+            out.append({
+                "id": t.id,
+                "title": t.title,
+                "body": t.body,
+                "context": t.context,
+                "music_url": t.music_url,
+                "music_original_url": t.music_original_url,
+                "image_filename": t.image_filename,
+                "image_url": t.image_url,
+                "date_dt": t.date,
+                "date": t.date.isoformat() if t.date else None,
+                "created_by": t.created_by_user.username,
+                "allowed_usernames": [uu.username for uu in t.allowed_users],
+                "default_allow": bool(t.default_allow),
+            })
+        return out
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
@@ -377,9 +463,6 @@ def migrate_json_to_sql() -> Dict[str, int]:
             added_t += 1
     return {"users_added": added_u, "texts_added": added_t}
 
-def _get_user_by_name(s, username:str) -> Optional[User]:
-    return s.scalar(select(User).where(sa.func.lower(User.username)==username.strip().lower()))
-
 def list_friendship(username:str) -> Dict[str, list]:
     with SessionLocal() as s:
         u = _get_user_by_name(s, username);
@@ -473,20 +556,46 @@ def remove_friend(me_username:str, other_username:str) -> None:
         s.execute(sa.delete(Friend).where(Friend.user_id==me.id, Friend.friend_user_id==other.id))
         s.execute(sa.delete(Friend).where(Friend.user_id==other.id, Friend.friend_user_id==me.id))
 
-def list_texts_visible_to(viewer_username:str, author_username:str) -> List[Text]:
-    """Textes de author visibles par viewer (auteur ou dans text_access)."""
+def list_texts_visible_to(viewer_username: str, author_username: str) -> List[Text]:
+    """
+    Textes de 'author' visibles par 'viewer':
+    - si viewer == author -> tous
+    - sinon: explicitement partagés OU (default_allow & amis)
+    """
     with SessionLocal() as s:
         viewer = _get_user_by_name(s, viewer_username)
         author = _get_user_by_name(s, author_username)
-        if not viewer or not author: return []
-        if viewer.id == author.id:
-            q = select(Text).where(Text.created_by_id==author.id)
-        else:
-            # author → textes dont text_access contient viewer
-            q = select(Text).join(text_access, text_access.c.text_id==Text.id) \
-                            .where(Text.created_by_id==author.id, text_access.c.user_id==viewer.id)
-        rows = s.scalars(q.order_by(Text.date.desc())).all()
-        return rows
+        if not viewer or not author:
+            return []
+
+        rows = s.scalars(select(Text).where(Text.created_by_id == author.id)
+                         .order_by(Text.date.desc())).all()
+        out = []
+        for t in rows:
+            if t.created_by_id == viewer.id:
+                out.append(t); continue
+            # partage explicite
+            seen = s.execute(sa.select(text_access.c.text_id)
+                             .where(text_access.c.text_id == t.id,
+                                    text_access.c.user_id == viewer.id)).first()
+            if seen:
+                out.append(t); continue
+            # public (amis)
+            if t.default_allow and are_friends(s, viewer.id, author.id):
+                out.append(t)
+        return out
+
+
+
+# --- Access helpers ----------------------------------------------------------
+def all_usernames(exclude: list[str] | None = None) -> list[str]:
+    """Liste de tous les usernames (sans admin par défaut, et sans doublons)."""
+    ex = {x.strip().lower() for x in (exclude or [])}
+    with SessionLocal() as s:
+        q = select(User.username)
+        rows = s.execute(q).scalars().all()
+        return [u for u in rows if u.strip().lower() not in ex]
+
 
 # Exports utiles à d'autres modules
 __all__ = [

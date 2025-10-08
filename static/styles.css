@@ -275,3 +275,70 @@ hr{ border:none; border-top:1px solid var(--border); margin:14px 0; }
 .badge { line-height: 1; }           /* déjà présent chez toi, OK si tu l’as */
 .badge.media { padding: 4px 6px; }   /* si tu veux une classe dédiée, sinon garde .badge */
 
+
+/* --- Permissions: chips + validation --- */
+.input.is-valid {
+  border-color: #86e49c !important;
+  box-shadow: 0 0 0 3px rgba(134, 228, 156, .25) !important;
+}
+.input.is-invalid {
+  border-color: #f3b0b0 !important;
+  box-shadow: 0 0 0 3px rgba(245, 143, 143, .20) !important;
+}
+
+.chip-stack {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;        /* empile sur plusieurs lignes si nécessaire */
+  align-items: center;
+  max-width: 100%;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #e6edf6;
+  background: #fff;
+  white-space: nowrap;
+}
+
+.chip-x {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: .6;
+}
+.chip-x:hover { opacity: 1; }
+
+.badge.yt-local {
+  border-color: #ffb3b3;
+  background: linear-gradient(90deg, #ffecec, #fff6f6);
+}
+
+.nav-left,
+.nav-right,
+.nav-menu,
+.nav-row {
+  overflow: visible !important;   /* ne plus couper les arrondis */
+}
+
+/* Laisse un peu plus d'air en Y pour éviter tout risque de coupe */
+.btn-nav,
+.button {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+  line-height: 1.2 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Si tu veux une hauteur pile et centrage parfait partout : */
+:root { --btn-h: 40px; }          /* (optionnel) un peu plus bas que 44 pour éviter squeeze */
+.btn-nav,
+.button { min-height: var(--btn-h); }

@@ -1,6 +1,6 @@
 {% extends 'layout.html' %}
 {% block content %}
-<h2 style="margin-bottom:10px;">{{ 'Tous les textes' if current_user.is_admin else 'Vos textes' }}</h2>
+<h2 style="margin-bottom:10px;">Bonne lecture !</h2>
 
 {% if texts|length == 0 %}
   <div class="card">
@@ -11,36 +11,37 @@
   <div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
     {% for t in texts %}
       <article class="card" style="display:flex; flex-direction:column; gap:8px;">
-
         <!-- En-tête -->
         <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline; flex-wrap:wrap;">
           <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
-
           <div style="display:flex; gap:8px; align-items:center;">
-            {% if t.media_badge %}
-              <span class="badge" title="{{ t.media_badge.label }}">{{ t.media_badge.icon }}</span>
+            {% if t.media_badge is defined and t.media_badge %}
+              <span class="badge {{ t.media_badge.class or '' }}" title="{{ t.media_badge.label }}">
+                {{ t.media_badge.icon }}
+              </span>
             {% endif %}
-            <div class="text-muted" style="white-space:nowrap;">
-              {{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}
-            </div>
+            {% if t.flags %}
+              {% for f in t.flags %}
+                <span class="badge" title="{{ f.label }}">{{ f.icon }}</span>
+              {% endfor %}
+            {% endif %}
+            <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
           </div>
         </div>
 
-        <!-- Auteur toujours visible (utile surtout pour les textes partagés) -->
-        <div class="text-muted" style="margin-top:-4px;">par {{ t.created_by }}</div>
+        {% if t.created_by %}
+          <div class="text-muted" style="margin-top:-4px;">par {{ t.created_by }}</div>
+        {% endif %}
 
         <!-- Bloc job YouTube (si présent) -->
         {% if t.yt_job_id %}
           <div class="card subtle" data-job-id="{{ t.yt_job_id }}" style="margin-top:6px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
               <div><strong>Extraction audio YouTube</strong></div>
-              {% set is_owner = (text.created_by is defined and text.created_by == current_user.get_id()) %}
-              {% if current_user.is_authenticated and (current_user.is_admin or is_owner) %}
-                <div class="inline-actions">
-                  <button class="button small danger btn-cancel">Annuler</button>
-                  <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
-                </div>
-              {% endif %}
+              <div class="inline-actions">
+                <button class="button small danger btn-cancel">Annuler</button>
+                <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
+              </div>
             </div>
             <div class="progress" style="margin-top:6px;"><div class="progress-bar" style="width:0%"></div></div>
             <div class="text-muted job-msg" style="margin-top:6px;">Préparation…</div>
@@ -61,15 +62,13 @@
           <div class="text-muted" style="font-style:italic;">{{ t.context }}</div>
         {% endif %}
 
-        <!-- Aperçu : si body legacy existe on le tronque, sinon message chiffré -->
+        <!-- Aperçu -->
         {% if t.body %}
           <p style="margin:0; white-space:pre-wrap; line-height:1.5; max-height:7.2em; overflow:hidden;">
             {{ t.body[:300] }}{% if t.body|length > 300 %}…{% endif %}
           </p>
         {% else %}
-          <p class="text-muted" style="margin:0;">
-            Contenu chiffré — ouvrir pour lire.
-          </p>
+          <p class="text-muted" style="margin:0;">Contenu chiffré — ouvrir pour lire.</p>
         {% endif %}
 
         <!-- Actions -->
@@ -79,57 +78,59 @@
           {% set is_owner = (t.created_by is defined and t.created_by == current_user.get_id()) %}
           {% if is_owner %}
             <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=t.id) }}">Modifier</a>
-            <form method="post" action="{{ url_for('texts.delete_text', text_id=t.id) }}"
-                  onsubmit="return confirm('Supprimer ce texte ?');" style="margin:0;">
+            <form method="post" action="{{ url_for('texts.delete_text', text_id=t.id) }}" style="margin:0;"
+                  onsubmit="return confirm('Supprimer ce texte ?');">
               <button class="button danger" type="submit">Supprimer</button>
             </form>
           {% endif %}
         </div>
-
       </article>
     {% endfor %}
   </div>
 {% endif %}
 
+<!-- Polling des jobs YT pour les cartes -->
 <script>
 (function(){
   const cards = document.querySelectorAll('[data-job-id]');
   if(!cards.length) return;
 
-  async function pollOne(card){
+  function bind(card){
     const id = card.getAttribute('data-job-id');
     const bar = card.querySelector('.progress-bar');
     const msg = card.querySelector('.job-msg');
     const btnCancel = card.querySelector('.btn-cancel');
     const btnRetry  = card.querySelector('.btn-retry');
 
-    try{
-      const r = await fetch("/jobs/"+id+"/status");
-      if(!r.ok){ msg.textContent = "Job inconnu."; return; }
-      const j = await r.json();
-      if(bar) bar.style.width = (j.progress||0)+"%";
-      if(msg) msg.textContent = (j.state||"") + (j.message ? " — "+j.message : "");
-
-      if(j.state === "done"){ location.reload(); return; }
-      if(j.state === "error" || j.state === "missing"){
-        if(btnRetry) btnRetry.style.display='inline-block';
-        if(btnCancel) btnCancel.disabled = true;
-        return;
-      }
-      if(j.state === "cancelled"){ if(msg) msg.textContent = "Annulé"; if(btnRetry) btnRetry.style.display = 'inline-block'; return; }
-
-      setTimeout(()=>pollOne(card), 1000);
-    }catch(e){
-      setTimeout(()=>pollOne(card), 2000);
+    async function poll(){
+      try{
+        const r = await fetch("/jobs/"+id+"/status");
+        if(!r.ok){ if(msg) msg.textContent="Job inconnu."; return; }
+        const j = await r.json();
+        if(bar) bar.style.width = (j.progress||0)+"%";
+        if(msg) msg.textContent = (j.state||"") + (j.message? " — "+j.message : "");
+        if(j.state === "done"){ location.reload(); return; }
+        if(j.state === "error" || j.state === "missing"){
+          if(btnRetry) btnRetry.style.display = 'inline-block';
+          if(btnCancel) btnCancel.disabled = true;
+          return;
+        }
+        if(j.state === "cancelled"){
+          if(msg) msg.textContent="Annulé";
+          if(btnRetry) btnRetry.style.display='inline-block';
+          return;
+        }
+        setTimeout(poll, 1000);
+      }catch(e){ setTimeout(poll, 2000); }
     }
+    poll();
 
-    {% if current_user.is_admin %}
     if(btnCancel && !btnCancel._bound){
       btnCancel._bound = true;
       btnCancel.addEventListener('click', async ()=>{
         btnCancel.disabled = true;
         await fetch("/jobs/"+id+"/cancel", {method:"POST"});
-        setTimeout(()=>pollOne(card), 300);
+        setTimeout(()=>location.reload(), 300);
       });
     }
     if(btnRetry && !btnRetry._bound){
@@ -140,10 +141,9 @@
         if(r.ok) location.reload(); else btnRetry.disabled = false;
       });
     }
-    {% endif %}
   }
 
-  cards.forEach(pollOne);
+  cards.forEach(bind);
 })();
 </script>
 {% endblock %}

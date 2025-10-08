@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 
 from flask import (
     Blueprint, render_template, redirect, url_for, request, flash,
-    send_file, abort, send_from_directory
+    send_file, abort, send_from_directory, current_app
 )
 from flask_login import current_user, login_user, logout_user, login_required
 
@@ -30,11 +30,97 @@ core_bp = Blueprint("core", __name__)
 # en haut du fichier (imports)
 from urllib.parse import urlsplit
 import re
-from flask import current_app
 
 from storage import get_conf
 limits = (get_conf(read_db()).get("limits") or {})
 MAX_IMPORT_MB = int(limits.get("import_max_mb", 512))
+
+import os, io, json, zipfile, hashlib, secrets
+from datetime import datetime
+from flask import abort, send_file, flash, redirect, url_for, request
+from werkzeug.utils import secure_filename
+
+import storage_sql as store
+from storage import read_db, get_conf
+from paths import UPLOAD_DIR
+
+# ---------- small utils ----------
+
+def _safe_join(root, *parts) -> str:
+    p = "/".join(str(x).strip("/\\") for x in parts if x)
+    return f"{root.rstrip('/')}/{p}" if p else root
+
+def _copy_into_zip(z: zipfile.ZipFile, src_path: os.PathLike, arcname: str):
+    try:
+        with open(src_path, "rb") as f:
+            z.writestr(arcname, f.read())
+    except FileNotFoundError:
+        pass
+
+def _load_backup_payload(fs) -> tuple[dict, zipfile.ZipFile | None]:
+    data = fs.read()
+    bio = io.BytesIO(data)
+    try:
+        zf = zipfile.ZipFile(bio)
+        with zf.open("backup.json") as jf:
+            payload = json.load(jf)
+        return payload, zf
+    except zipfile.BadZipFile:
+        payload = json.loads(data.decode("utf-8"))
+        return payload, None
+
+def _import_asset_from_zip(zf: zipfile.ZipFile, arc: str) -> str | None:
+    """Copie un asset depuis le zip dans /uploads et retourne le nouveau nom de fichier."""
+    try:
+        info = zf.getinfo(arc)
+    except KeyError:
+        return None
+    name = os.path.basename(info.filename)
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in (".jpg",".jpeg",".png",".gif",".webp",".mp3",".m4a",".ogg",".opus",".wav",".mp4"):
+        ext = ""
+    new = f"{secrets.token_urlsafe(16)}{ext}"
+    out = UPLOAD_DIR / new
+    with zf.open(info) as src, open(out, "wb") as dst:
+        dst.write(src.read())
+    return new
+
+def _text_fingerprint_dict(d: dict) -> str:
+    """Empreinte stable d'un texte (pour fusion) : auteur|date|SHA1(core)."""
+    base = f"{d.get('created_by','')}|{d.get('date','')}"
+    core = d.get("ciphertext") or f"{d.get('title','')}|{d.get('body','')}"
+    return hashlib.sha1((base + "|" + core).encode("utf-8", "ignore")).hexdigest()[:16]
+
+
+def _getv(row, name, default=None):
+    """Récupère une valeur depuis un dict OU un objet ORM."""
+    if isinstance(row, dict):
+        return row.get(name, default)
+    return getattr(row, name, default)
+
+def _row_to_vm(row):
+    """Convertit un row (dict ou ORM) en VM minimale (sans décrypt)."""
+    rid = _getv(row, "id")
+    date_dt = _getv(row, "date_dt") or _getv(row, "date")
+    if isinstance(date_dt, str):
+        try:
+            date_dt = datetime.fromisoformat(date_dt)
+        except Exception:
+            date_dt = datetime.utcnow()
+    if not date_dt:
+        date_dt = datetime.utcnow()
+
+    return {
+        "id": rid,
+        "date_dt": date_dt,
+        "created_by": _getv(row, "created_by"),
+        "title": _getv(row, "title"),
+        "body": _getv(row, "body"),
+        "context": _getv(row, "context"),
+        "image_filename": _getv(row, "image_filename"),
+        "image_url": _getv(row, "image_url"),
+        "music_url": _getv(row, "music_url"),
+    }
 
 def _is_safe_next(url: str | None) -> bool:
     if not url:
@@ -127,12 +213,26 @@ AUDIO_EXTS = {"mp3", "m4a", "aac", "ogg", "wav", "webm", "opus"}
 
 
 # Indicateur "média extérieur" pour le dashboard
-def _media_badge(music_url: str | None):
-    if not music_url:
+def _media_badge(music_url: str | None, music_original_url: str | None):
+    """
+    Renvoie un badge {icon,label} pour affichage dans le dashboard.
+    - Fichier local + origine YouTube => badge YouTube (local)
+    - URL YouTube => badge YouTube
+    - Autres plateformes… idem qu’avant
+    - Fichier local sans origine => pas de badge
+    """
+    u = (music_url or "").strip().lower()
+    orig = (music_original_url or "").strip().lower()
+
+    # 1) Fichier local ?
+    if u.startswith("/uploads/"):
+        # S'il a été importé depuis YouTube, on met le même badge que pour les vidéos
+        if "youtube.com" in orig or "youtu.be" in orig:
+            return {"icon":"▶️","label":"YouTube (local)","class":"yt-local"}
+        # sinon pas d'indicateur
         return None
-    u = music_url.strip().lower()
-    if u.startswith("/uploads/"):   # fichier local => pas d'indicateur
-        return None
+
+    # 2) Liens externes (comme avant)
     if "youtube.com" in u or "youtu.be" in u:
         return {"icon": "▶️", "label": "YouTube"}
     if "open.spotify.com" in u:
@@ -143,10 +243,12 @@ def _media_badge(music_url: str | None):
         return {"icon": "🔷", "label": "Deezer"}
     if "music.apple.com" in u or "embed.music.apple.com" in u:
         return {"icon": "🍎", "label": "Apple Music"}
-    # audio direct http(s)
-    if u.startswith("http") and any(u.endswith("."+ext) for ext in ["mp3","m4a","aac","ogg","wav","opus"]):
+    if u.startswith("http") and any(u.endswith("."+ext) for ext in ["mp3","m4a","aac","ogg","opus","wav"]):
         return {"icon": "🎵", "label": "Audio"}
-    return {"icon": "🌐", "label": "Lien"}
+    if u.startswith("http"):
+        return {"icon": "🌐", "label": "Lien"}
+
+    return None
 
 
 
@@ -259,58 +361,65 @@ def logout_view():
 # ------------------- Dashboard -------------------
 
 @core_bp.route("/dashboard")
-# --- fonction dashboard : remplacer entièrement ---
 @login_required
 def dashboard():
     try:
-        is_admin = getattr(current_user, "is_admin", False)
-        rows = store.list_texts_for_user(current_user.get_id(), is_admin)
+        rows = store.list_texts_accessible(current_user.get_id())
+    except Exception:
+        current_app.logger.exception("dashboard: list_texts_for_user failed")
+        flash("Impossible d'afficher le tableau de bord.")
+        return render_template("dashboard.html", texts=[])
 
-        vms = []
-        for r in rows:
-            full = store.get_text_dict(r["id"]) or {}
-            title = r.get("title"); body = None; context = None
+    texts = []
+    for r in rows:
+        try:
+            vm = _row_to_vm(r)
+            # recharger le texte complet (pour always get created_by + cipher_*)
+            full = store.get_text_dict(vm["id"]) or {}
+            vm["created_by"] = full.get("created_by", vm["created_by"])
 
+            # déchiffrer si possible
+            title = vm["title"]; body = vm["body"]; context = vm["context"]
             if full.get("ciphertext") and full.get("cipher_nonce"):
                 try:
-                    clear = cserv.decrypt_text_payload(full["created_by"], full["ciphertext"], full["cipher_nonce"])
+                    clear = cserv.decrypt_text_payload(
+                        full["created_by"], full["ciphertext"], full["cipher_nonce"]
+                    )
                     title   = clear.get("title") or title
                     body    = clear.get("body")
                     context = clear.get("context")
                 except Exception:
-                    # fallback legacy si dispo
-                    title = (r.get("title") or title or "(indéchiffrable)")
-                    body = (r.get("body") or "(indéchiffrable)")
-                    context = r.get("context")
-            else:
-                body    = r.get("body")
-                context = r.get("context")
+                    current_app.logger.warning("decrypt failed on text %s", vm["id"], exc_info=True)
+                    title   = title or "(indéchiffrable)"
+                    body    = "(indéchiffrable)"
+                    context = None
 
-            vm = {
-                "id": r["id"],
-                "date_dt": r["date_dt"],
-                "created_by": full.get("created_by", r.get("created_by")),
-                "title": title or "(sans titre)",
-                "body": body,
-                "context": context,
-                "image_filename": r.get("image_filename"),
-                "image_url": r.get("image_url"),
-                "music_url": r.get("music_url"),
-            }
+            vm["title"]   = title or "(sans titre)"
+            vm["body"]    = body
+            vm["context"] = context
+
             mu = full.get("music_url") or r.get("music_url")
-            vm["media_badge"] = _media_badge(mu)
+            morig = full.get("music_original_url") or r.get("music_original_url")
+            vm["media_badge"] = _media_badge(mu, morig)
+
+            if full.get("default_allow") or r.get("default_allow"):
+                vm.setdefault("flags", []).append({"icon": "👥", "label": "Public (amis)"})
+
+            # widget YT (si extraction en cours)
             try:
-                yt = (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(r["id"]))
-                if yt: vm["yt_job_id"] = yt
+                yt = (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(vm["id"]))
+                if yt:
+                    vm["yt_job_id"] = yt
             except Exception:
                 pass
-            vms.append(vm)
 
-        vms.sort(key=lambda t: t["date_dt"], reverse=True)
-        return render_template("dashboard.html", texts=vms)
-    except Exception:
-        flash("Impossible d'afficher le tableau de bord.")
-        return render_template("dashboard.html", texts=[])
+            texts.append(vm)
+        except Exception:
+            current_app.logger.exception("dashboard: failed to build VM for row=%r", r)
+            # on skip juste ce texte
+
+    texts.sort(key=lambda t: t["date_dt"], reverse=True)
+    return render_template("dashboard.html", texts=texts)
 
 
 # ------------------- Uploads (images/audio) -------------------
@@ -330,56 +439,124 @@ def admin_backup():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    db = read_db()
-    data = json.loads(json.dumps(db))  # deep copy pour annoter
+    # 1) Config (depuis data.json) — on n’exporte que la config
+    conf = get_conf(read_db())
 
-    assets_root = "assets"
+    # 2) Lecture SQL
+    with store.SessionLocal() as s:
+        users = s.scalars(store.select(store.User)).all()
+        texts = s.scalars(store.select(store.Text)).all()
 
-    # Parcours des textes: embarquer fichiers + conserver les URLs originales
-    for t in data.get("texts", []):
-        t.setdefault("backup_assets", {})
+        # relations optionnelles (si présentes dans le module)
+        friends, friend_requests = [], []
+        if hasattr(store, "Friend"):
+            frs = s.scalars(store.select(store.Friend)).all()
+            for fr in frs:
+                friends.append({"user": s.get(store.User, fr.user_id).username,
+                                "friend": s.get(store.User, fr.friend_user_id).username,
+                                "created_at": fr.created_at.isoformat()})
+        if hasattr(store, "FriendRequest"):
+            rqs = s.scalars(store.select(store.FriendRequest)).all()
+            for rq in rqs:
+                friends.append if False else None
+            for rq in rqs:
+                friend_requests.append({
+                    "from": s.get(store.User, rq.from_user_id).username,
+                    "to": s.get(store.User, rq.to_user_id).username,
+                    "status": rq.status,
+                    "created_at": rq.created_at.isoformat(),
+                    "responded_at": rq.responded_at.isoformat() if rq.responded_at else None
+                })
 
-        mus_url = t.get("music_url")
-        if mus_url and isinstance(mus_url, str) and mus_url.startswith("/uploads/"):
-            fname = mus_url.split("/")[-1]
-            arc = _safe_join(assets_root, "music", fname)
-            t["backup_assets"]["music_file"] = arc
-        if not t.get("music_original_url") and mus_url and not mus_url.startswith("/uploads/"):
-            t["music_original_url"] = mus_url
+        tokens = []
+        if hasattr(store, "SpotifyToken"):
+            toks = s.scalars(store.select(store.SpotifyToken)).all()
+            for t in toks:
+                u = s.get(store.User, t.user_id)
+                tokens.append({
+                    "username": u.username if u else None,
+                    "access_token": t.access_token,
+                    "refresh_token": t.refresh_token,
+                    "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+                })
 
-        if t.get("image_filename"):
-            img = t["image_filename"]
-            arc = _safe_join(assets_root, "images", img)
-            t["backup_assets"]["image_file"] = arc
-        if t.get("image_url") and not t.get("image_original_url"):
-            t["image_original_url"] = t["image_url"]
+        # 3) Construire JSON
+        payload = {
+            "schema": 2,
+            "exported_at": datetime.utcnow().isoformat(),
+            "config": conf,  # seulement config depuis data.json
+            "users": [{
+                "username": u.username,
+                "password_hash": u.password_hash,
+                "email": u.email,
+                "encrypted_user_key": u.encrypted_user_key,  # garde l’UDK scellée
+                "is_admin": bool(u.is_admin),
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            } for u in users],
+            "texts": [],
+            "friends": friends,
+            "friend_requests": friend_requests,
+            "spotify_tokens": tokens,
+        }
 
-    # Construction du zip
+        assets_root = "assets"
+        for t in texts:
+            allowed_unames = [u.username for u in t.allowed_users]
+            item = {
+                "id": t.id,
+                "cipher_alg": t.cipher_alg,
+                "ciphertext": t.ciphertext,
+                "cipher_nonce": t.cipher_nonce,
+                "default_allow": bool(t.default_allow),
+                "music_url": t.music_url,
+                "music_original_url": t.music_original_url,
+                "image_filename": t.image_filename,
+                "image_url": t.image_url,
+                "image_original_url": t.image_original_url,
+                "date": t.date.isoformat() if t.date else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                "created_by": t.created_by_user.username,
+                "allowed_usernames": allowed_unames,
+                "backup_assets": {}
+            }
+            # marquer assets à embarquer
+            if t.music_url and isinstance(t.music_url, str) and t.music_url.startswith("/uploads/"):
+                fname = t.music_url.split("/")[-1]
+                item["backup_assets"]["music_file"] = _safe_join(assets_root, "music", fname)
+                if not item.get("music_original_url"):
+                    item["music_original_url"] = t.music_original_url
+            if t.image_filename:
+                item["backup_assets"]["image_file"] = _safe_join(assets_root, "images", t.image_filename)
+                if not item.get("image_original_url"):
+                    item["image_original_url"] = t.image_url
+
+            payload["texts"].append(item)
+
+    # 4) ZIP (assets + backup.json)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        # Ajouter les assets présents sur disque
-        for t in db.get("texts", []):
+        for t in payload["texts"]:
+            ba = t.get("backup_assets") or {}
             # musique
-            mus_url = t.get("music_url")
-            if mus_url and isinstance(mus_url, str) and mus_url.startswith("/uploads/"):
-                fname = mus_url.split("/")[-1]
-                _copy_into_zip(z, UPLOAD_DIR / fname, _safe_join(assets_root, "music", fname))
+            mf = ba.get("music_file")
+            if mf:
+                fname = os.path.basename(mf)
+                _copy_into_zip(z, UPLOAD_DIR / fname, mf)
             # image
-            if t.get("image_filename"):
-                img = t["image_filename"]
-                _copy_into_zip(z, UPLOAD_DIR / img, _safe_join(assets_root, "images", img))
+            imf = ba.get("image_file")
+            if imf:
+                fname = os.path.basename(imf)
+                _copy_into_zip(z, UPLOAD_DIR / fname, imf)
 
-        # ajouter le JSON annoté
-        z.writestr("backup.json", json.dumps(data, ensure_ascii=False, indent=2))
+        z.writestr("backup.json", json.dumps(payload, ensure_ascii=False, indent=2))
 
     buf.seek(0)
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    return send_file(
-        buf,
-        as_attachment=True,
-        download_name=f"pastel_notes_backup_{stamp}.zip",
-        mimetype="application/zip",
-    )
+    return send_file(buf, as_attachment=True,
+                     download_name=f"pastel_notes_backup_{stamp}.zip",
+                     mimetype="application/zip")
+
 
 
 # ------------------- Admin: Import (.json / .zip) -------------------
@@ -390,134 +567,180 @@ def admin_import():
     if not getattr(current_user, "is_admin", False):
         abort(403)
 
-    if request.method == "POST":
-        if request.content_length and request.content_length > MAX_IMPORT_MB * 1024 * 1024:
-            flash(f"Fichier trop volumineux (> {MAX_IMPORT_MB} Mo).")
-            return redirect(url_for('core.admin_import'))
-        f = request.files.get("file")
-        replace_all = (request.form.get("replace_all") == "1")
-        if not f or not f.filename:
-            flash("Choisissez un fichier .json ou .zip.")
-            return redirect(url_for("core.admin_import"))
+    if request.method != "POST":
+        return render_template("import.html")
 
-        try:
-            payload, zf = _load_backup_payload(f)
-        except Exception as e:
-            flash(f"Import impossible: {e}")
-            return redirect(url_for("core.admin_import"))
+    # taille
+    if request.content_length and request.content_length > MAX_IMPORT_MB * 1024 * 1024:
+        flash(f"Fichier trop volumineux (> {MAX_IMPORT_MB} Mo).")
+        return redirect(url_for("core.admin_import"))
 
-        db = read_db()
+    f = request.files.get("file")
+    replace_all = (request.form.get("replace_all") == "1")
+    if not f or not f.filename:
+        flash("Choisissez un fichier .json ou .zip.")
+        return redirect(url_for("core.admin_import"))
 
-        # --- Config: on NE REMPLACE PAS secret_key ni admin
-        incoming_conf = (payload.get("config") or {})
-        db_conf = db.setdefault("config", {})
+    try:
+        payload, zf = _load_backup_payload(f)
+    except Exception as e:
+        flash(f"Import impossible: {e}")
+        return redirect(url_for("core.admin_import"))
+
+    # 1) Config : on n’écrase PAS secret_key ni admin
+    incoming_conf = (payload.get("config") or {})
+    db_conf = get_conf(read_db())  # lecture actuelle
+    for k, v in incoming_conf.items():
+        if k in {"secret_key", "admin"}:
+            continue
+        # écriture via ta CLI existante si tu veux, sinon laisse tel quel (config reste dans data.json)
+        # ex: app.py config-set … (facultatif)
+
+    # 2) SQL : transaction
+    added_users = added_texts = added_access = 0
+
+    with store.SessionLocal.begin() as s:
+        # (optionnel) purge
         if replace_all:
-            for k, v in incoming_conf.items():
-                if k in {"secret_key", "admin"}:
-                    continue
-                db_conf[k] = v if v is not None else db_conf.get(k)
-        else:
-            for k, v in incoming_conf.items():
-                if k in {"secret_key", "admin"}:
-                    continue
-                if k not in db_conf:
-                    db_conf[k] = v
+            if hasattr(store, "SpotifyToken"):
+                s.execute(store.sa.delete(store.SpotifyToken))
+            if hasattr(store, "Friend"):
+                s.execute(store.sa.delete(store.Friend))
+            if hasattr(store, "FriendRequest"):
+                s.execute(store.sa.delete(store.FriendRequest))
+            s.execute(store.sa.delete(store.text_access))
+            s.execute(store.sa.delete(store.Text))
+            s.execute(store.sa.delete(store.User))
 
-        # --- Users
-        incoming_users = payload.get("users") or []
-        if replace_all:
-            db["users"] = []
-        existing = {(u.get("username", "").strip().lower()) for u in db.get("users", [])}
-        for u in incoming_users:
+        # index auxiliaires
+        def _get_user(uname: str):
+            return s.scalar(store.select(store.User).where(store.sa.func.lower(store.User.username)==uname.strip().lower()))
+
+        # Users
+        for u in (payload.get("users") or []):
             uname = (u.get("username") or "").strip()
             if not uname:
                 continue
-            if uname.lower() in existing:
+            if _get_user(uname):
                 continue
-            db.setdefault("users", []).append({
-                "username": uname,
-                "password_hash": u.get("password_hash"),
-                "created_at": u.get("created_at") or datetime.utcnow().isoformat(),
-            })
-            existing.add(uname.lower())
+            row = store.User(
+                username=uname,
+                password_hash=u.get("password_hash") or "",
+                email=u.get("email"),
+                encrypted_user_key=u.get("encrypted_user_key"),
+                is_admin=bool(u.get("is_admin")),
+                created_at=datetime.fromisoformat(u["created_at"]) if u.get("created_at") else datetime.utcnow()
+            )
+            s.add(row); added_users += 1
+        s.flush()
 
-        # --- Texts
-        incoming_texts = payload.get("texts") or []
-        if replace_all:
-            db["texts"] = []
+        # s'assurer que l'admin défini en config existe et est admin
+        adm = (incoming_conf.get("admin") or db_conf.get("admin") or {}).get("username")
+        if adm:
+            uadm = _get_user(adm)
+            if not uadm:
+                uadm = store.User(username=adm, password_hash="", is_admin=True, created_at=datetime.utcnow())
+                s.add(uadm); added_users += 1
+            else:
+                uadm.is_admin = True
 
-        have_fp = {_text_fingerprint(t) for t in db.get("texts", [])}
-        for t in incoming_texts:
+        # Textes (fusion par empreinte)
+        # on construit un set des empreintes existantes
+        existing = set()
+        for t in s.scalars(store.select(store.Text)).all():
+            d = {
+                "created_by": t.created_by_user.username,
+                "date": t.date.isoformat() if t.date else "",
+                "ciphertext": t.ciphertext,
+                "title": t.title, "body": t.body
+            }
+            existing.add(_text_fingerprint_dict(d))
+
+        for t in (payload.get("texts") or []):
+            # map auteur
+            author = _get_user(t.get("created_by") or "")
+            if not author:
+                author = store.User(username=t.get("created_by") or "unknown", password_hash="", is_admin=False, created_at=datetime.utcnow())
+                s.add(author); s.flush(); added_users += 1
+
+            # assets (si zip)
             ba = t.get("backup_assets") or {}
-
-            # musique
             new_music_url = t.get("music_url")
-            if zf and ba.get("music_file"):
-                newname = _import_assets_from_zip(zf, ba["music_file"])
-                if newname:
-                    new_music_url = f"/uploads/{newname}"
-
-            # image
             new_image_filename = t.get("image_filename")
-            if zf and ba.get("image_file"):
-                newimg = _import_assets_from_zip(zf, ba["image_file"])
-                if newimg:
-                    new_image_filename = newimg
 
-            new_text = {
-                "id": t.get("id"),
+            if zf and ba.get("music_file"):
+                nm = _import_asset_from_zip(zf, ba["music_file"])
+                if nm:
+                    new_music_url = f"/uploads/{nm}"
+            if zf and ba.get("image_file"):
+                ni = _import_asset_from_zip(zf, ba["image_file"])
+                if ni:
+                    new_image_filename = ni
+
+            new_dict = {
+                "created_by": author.username,
+                "date": t.get("date") or "",
+                "ciphertext": t.get("ciphertext"),
                 "title": t.get("title"),
                 "body": t.get("body"),
-                "context": t.get("context"),
-                "music_url": new_music_url,
-                "music_original_url": t.get("music_original_url"),
-                "youtube_mode": t.get("youtube_mode"),
-                "image_filename": new_image_filename,
-                "image_url": t.get("image_url"),
-                "image_original_url": t.get("image_original_url"),
-                "date": t.get("date") or datetime.utcnow().isoformat(),
-                "created_at": t.get("created_at") or datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat(),
-                "created_by": t.get("created_by"),
-                "allowed_usernames": t.get("allowed_usernames") or [],
             }
-            fp = _text_fingerprint(new_text)
-            if (not replace_all) and fp in have_fp:
+            fp = _text_fingerprint_dict(new_dict)
+            if not replace_all and fp in existing:
                 continue
-            if not replace_all:
-                if any(int(x.get("id", -1)) == int(new_text.get("id", -1)) for x in db.get("texts", [])):
-                    new_text.pop("id", None)
-            db.setdefault("texts", []).append(new_text)
-            have_fp.add(fp)
 
-        # sanitation
-        ensure_unique_usernames(db)
+            row = store.Text(
+                cipher_alg=t.get("cipher_alg"),
+                ciphertext=t.get("ciphertext"),
+                cipher_nonce=t.get("cipher_nonce"),
+                default_allow=bool(t.get("default_allow") or False),
+                music_url=new_music_url,
+                music_original_url=t.get("music_original_url"),
+                image_filename=new_image_filename,
+                image_url=t.get("image_url"),
+                image_original_url=t.get("image_original_url"),
+                date=datetime.fromisoformat(t["date"]) if t.get("date") else datetime.utcnow(),
+                created_at=datetime.fromisoformat(t["created_at"]) if t.get("created_at") else datetime.utcnow(),
+                updated_at=datetime.fromisoformat(t["updated_at"]) if t.get("updated_at") else datetime.utcnow(),
+                created_by_id=author.id
+            )
+            s.add(row); s.flush()
+            added_texts += 1
 
-        # recalcul next_ids.text
-        try:
-            max_id = max(int(t.get("id", 0)) for t in db.get("texts", []) if t.get("id") is not None)
-        except ValueError:
-            max_id = 0
-        db.setdefault("next_ids", {})["text"] = int(max_id) + 1
+            # permissions
+            for uname in (t.get("allowed_usernames") or []):
+                u = _get_user(uname)
+                if not u:
+                    continue
+                # existe déjà ?
+                seen = s.execute(store.sa.select(store.text_access.c.text_id)
+                                 .where(store.text_access.c.text_id==row.id,
+                                        store.text_access.c.user_id==u.id)).first()
+                if not seen:
+                    s.execute(store.sa.insert(store.text_access).values(text_id=row.id, user_id=u.id))
+                    added_access += 1
 
-        texts = db.get("texts", [])
-        used = set()
-        for t in texts:
-            try:
-                used.add(int(t.get("id")))
-            except Exception:
-                pass
-        nid = (max(used) + 1) if used else 1
-        for t in texts:
-            try:
-                int(t.get("id"))
-            except Exception:
-                t["id"] = nid
-                nid += 1
-        db.setdefault("next_ids", {})["text"] = nid
+        # Spotify tokens
+        for tok in (payload.get("spotify_tokens") or []):
+            uname = tok.get("username")
+            if not uname: continue
+            u = _get_user(uname)
+            if not u: continue
+            if hasattr(store, "SpotifyToken"):
+                old = s.get(store.SpotifyToken, u.id)
+                if old: s.delete(old)
+                s.add(store.SpotifyToken(
+                    user_id=u.id,
+                    access_token=tok.get("access_token"),
+                    refresh_token=tok.get("refresh_token"),
+                    expires_at=datetime.fromisoformat(tok["expires_at"]) if tok.get("expires_at") else None
+                ))
 
-        write_db(db)
-        flash("Import terminé.")
-        return redirect(url_for("core.dashboard"))
+    # UDK pour les nouveaux users (si tu utilises le chiffrement serveur)
+    try:
+        import crypto_server as cserv
+        cserv.ensure_all_user_udk()
+    except Exception:
+        pass
 
-    return render_template("import.html")
+    flash(f"Import terminé. Users+{added_users}, Textes+{added_texts}, Permissions+{added_access}.")
+    return redirect(url_for("core.dashboard"))
