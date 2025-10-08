@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', function(){
     {% if current_user.is_authenticated %}
       <div class="nav-left">
         <span class="badge user"
-              title="Connecté : {{ current_user.get_id() }}{% if current_user.is_admin %} (admin){% endif %}">
+              title="{{ current_user.get_id() }}{% if current_user.is_admin %} (admin){% endif %}">
           <span class="label">Connecté :</span>
           <span class="uname">{{ current_user.get_id() }}</span>
           {% if current_user.is_admin %}
