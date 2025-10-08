@@ -16,7 +16,9 @@
           <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
           <div style="display:flex; gap:8px; align-items:center;">
             {% if t.media_badge is defined and t.media_badge %}
-              <span class="badge" title="{{ t.media_badge.label }}">{{ t.media_badge.icon }}</span>
+              <span class="badge {{ t.media_badge.class or '' }}" title="{{ t.media_badge.label }}">
+                {{ t.media_badge.icon }}
+              </span>
             {% endif %}
             <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
           </div>

@@ -314,3 +314,31 @@ hr{ border:none; border-top:1px solid var(--border); margin:14px 0; }
   opacity: .6;
 }
 .chip-x:hover { opacity: 1; }
+
+.badge.yt-local {
+  border-color: #ffb3b3;
+  background: linear-gradient(90deg, #ffecec, #fff6f6);
+}
+
+.nav-left,
+.nav-right,
+.nav-menu,
+.nav-row {
+  overflow: visible !important;   /* ne plus couper les arrondis */
+}
+
+/* Laisse un peu plus d'air en Y pour éviter tout risque de coupe */
+.btn-nav,
+.button {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+  line-height: 1.2 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Si tu veux une hauteur pile et centrage parfait partout : */
+:root { --btn-h: 40px; }          /* (optionnel) un peu plus bas que 44 pour éviter squeeze */
+.btn-nav,
+.button { min-height: var(--btn-h); }

@@ -1,24 +1,51 @@
 {% extends 'layout.html' %}
 {% block content %}
-<h2>Importer</h2>
-<div class="card">
-    <p class="text-muted">
-        Importez un <code>backup.json</code> ou un <code>backup.zip</code> (avec <code>backup.json</code> + dossier
-        <code>assets/</code>).
-    </p>
-    <form enctype="multipart/form-data" method="post">
-        <label for="file">Fichier (.json ou .zip)</label>
-        <input accept=".json,.zip" class="input" id="file" name="file" required type="file">
+<h2>Importer un backup</h2>
 
-        <label class="checkbox-pill" style="margin-top:10px; width:max-content;">
-            <input name="replace_all" type="checkbox" value="1">
-            Tout remplacer (textes &amp; utilisateurs)
-        </label>
+<div class="card" style="max-width:640px; margin:0 auto; display:flex; flex-direction:column; gap:12px;">
+  <p>
+    Sélectionnez un fichier <strong>.zip</strong> (recommandé) ou <strong>.json</strong> exporté depuis PastelNotes.
+    Le ZIP peut contenir <code>backup.json</code> et les fichiers d’<code>uploads/</code>.
+  </p>
 
-        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="button" type="submit">Importer</button>
-            <a class="button secondary" href="{{ url_for('core.dashboard') }}">Annuler</a>
-        </div>
-    </form>
+  <form method="post" enctype="multipart/form-data" id="import-form">
+    <label for="file">Fichier</label>
+    <input class="input" id="file" name="file" type="file" accept=".zip,.json" required>
+
+    <label class="checkbox-pill" style="margin-top:6px;">
+      <input type="checkbox" id="replace_all" name="replace_all" value="1">
+      <span>Tout remplacer (vide la base puis importe)</span>
+    </label>
+
+    <div class="text-muted" style="font-size:.9rem;">
+      • <strong>Fusion</strong> (par défaut) : ajoute uniquement ce qui n’existe pas encore (users, textes, permissions).<br>
+      • <strong>Tout remplacer</strong> : efface les données SQL (users, textes, permissions, amis, tokens) puis recharge le backup.
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+      <button class="button" type="submit" id="btn-import" disabled>Importer</button>
+      <a class="button secondary" href="{{ url_for('core.dashboard') }}">Annuler</a>
+    </div>
+  </form>
 </div>
+
+<script>
+(function(){
+  const file = document.getElementById('file');
+  const btn  = document.getElementById('btn-import');
+
+  function validExt(n){
+    return /\.zip$/i.test(n) || /\.json$/i.test(n);
+  }
+  function refresh(){
+    btn.disabled = !(file.files && file.files.length && validExt(file.files[0].name));
+    file.classList.remove('is-valid','is-invalid');
+    if(file.files && file.files.length){
+      file.classList.add(validExt(file.files[0].name) ? 'is-valid' : 'is-invalid');
+    }
+  }
+  file.addEventListener('change', refresh);
+  document.addEventListener('DOMContentLoaded', refresh);
+})();
+</script>
 {% endblock %}
