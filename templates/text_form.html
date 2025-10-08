@@ -83,6 +83,15 @@
   <!-- Permissions -->
   <div class="card subtle" style="margin-top:10px;">
   <div style="font-weight:700; margin-bottom:6px;">Qui peut voir ce texte ?</div>
+    <label class="checkbox-pill" style="margin-bottom:8px;">
+      <input type="checkbox" name="is_public" value="1"
+             {% if text and text.is_public %}checked{% endif %}>
+      <span>Public (visible par tous mes amis)</span>
+    </label>
+    <div class="text-muted" style="font-size:.9rem; margin-bottom:10px;">
+      Si coché, tous vos amis pourront voir ce texte automatiquement.
+      Vous pouvez en plus ajouter des personnes précises ci-dessous.
+    </div>
 
   {% set SUGGEST = users or [] %}  {# liste côté serveur, sans admin #}
   {% set PRE = (text.allowed_usernames if text and text.allowed_usernames else []) %}

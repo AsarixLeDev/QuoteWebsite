@@ -402,6 +402,9 @@ def dashboard():
             morig = full.get("music_original_url") or r.get("music_original_url")
             vm["media_badge"] = _media_badge(mu, morig)
 
+            if full.get("default_allow") or r.get("default_allow"):
+                vm.setdefault("flags", []).append({"icon": "👥", "label": "Public (amis)"})
+
             # widget YT (si extraction en cours)
             try:
                 yt = (read_db().get("jobs", {}).get("yt", {}) or {}).get(str(vm["id"]))

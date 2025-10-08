@@ -59,43 +59,32 @@ def friends_remove():
 @friends_bp.route("/u/<username>/texts", methods=["GET"])
 @login_required
 def friend_texts(username: str):
-    # Textes de 'username' visibles par l'utilisateur courant
     rows = store.list_texts_visible_to(current_user.get_id(), username)
 
     vms = []
     for obj in rows:
-        # obj peut être un ORM Text ou un dict selon l'implémentation actuelle
-        if isinstance(obj, dict):
-            tid = obj.get("id")
-        else:
-            tid = getattr(obj, "id", None)
+        tid = obj.id if hasattr(obj, "id") else obj.get("id")
         if not tid:
+            continue
+        # Ceinture-bretelles
+        if not store.can_user_view_text(current_user.get_id(), tid):
             continue
 
         full = store.get_text_dict(tid)
         if not full:
             continue
 
-        # Déchiffrer avec la clé de l’AUTEUR (pas celle du lecteur)
-        title = full.get("title")
-        body = None
-        context = None
+        # Déchiffrage pour l'aperçu
+        import crypto_server as cserv
+        title, body, context = full.get("title"), None, None
         if full.get("ciphertext") and full.get("cipher_nonce"):
             try:
-                clear = cserv.decrypt_text_payload(
-                    full["created_by"], full["ciphertext"], full["cipher_nonce"]
-                )
+                clear = cserv.decrypt_text_payload(full["created_by"], full["ciphertext"], full["cipher_nonce"])
                 title   = clear.get("title") or title
                 body    = clear.get("body")
                 context = clear.get("context")
             except Exception:
-                title   = title or "(indéchiffrable)"
-                body    = "(indéchiffrable)"
-                context = None
-        else:
-            # legacy clair, au cas où
-            body    = full.get("body")
-            context = full.get("context")
+                title = title or "(indéchiffrable)"; body="(indéchiffrable)"; context=None
 
         vms.append({
             "id": full["id"],

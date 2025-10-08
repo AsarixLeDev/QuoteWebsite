@@ -20,6 +20,11 @@
                 {{ t.media_badge.icon }}
               </span>
             {% endif %}
+            {% if t.flags %}
+              {% for f in t.flags %}
+                <span class="badge" title="{{ f.label }}">{{ f.icon }}</span>
+              {% endfor %}
+            {% endif %}
             <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
           </div>
         </div>
