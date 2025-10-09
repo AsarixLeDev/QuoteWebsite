@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="nav-left">
         <span class="badge user"
               title="{{ current_user.get_id() }}{% if current_user.is_admin %} (admin){% endif %}">
-          <span class="label">Connecté : </span>
+          <span class="label">Connecté :&puncsp;</span>
           <span class="uname">{{ current_user.get_id() }}</span>
           {% if current_user.is_admin %}
             <span class="role">(admin)</span>
@@ -74,7 +74,6 @@ document.addEventListener('DOMContentLoaded', function(){
             <a class="btn-nav" href="{{ url_for('spotify.connect') }}">Se connecter Spotify</a>
           {% endif %}
         {% endif %}
-        <a class="btn-nav danger" href="{{ url_for('core.logout_view') }}">Se déconnecter</a>
       </div>
     {% else %}
       <div class="nav-left">

@@ -283,7 +283,8 @@ label { font-weight: 600; display: block; margin: 6px 0; }
 @media (prefers-color-scheme: dark) {
   body { background: var(--bg); color: var(--text); }
   .card, .button, .btn-nav, .badge { background: var(--card); color: var(--text); }
-  .button:hover, .btn-nav:hover { box-shadow: var(--shadow); }
+  .button.secondary, .button.danger, .btn-nav.danger {background: var(--card); color: var(--text); }
+  .button:hover, .btn-nav:hover, .button.danger, .btn-nav.danger { box-shadow: var(--shadow); }
   .input, .textarea, select { background: #1f2833; color: var(--text); border-color: var(--border); }
   .nav a, .brand a { color: var(--text); }
   .flash { background: #262f3b; border-color: #33414f; color: var(--text); }
