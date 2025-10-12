@@ -1,76 +1,107 @@
-/* =============================== */
-/*  Pastel v2 – soft & bright      */
-/*  Light + Dark mode foundation   */
-/* =============================== */
+/* ==========================================================
+   Pastel v2+ (Soft & Bright • Light + Dark foundation • Smooth fade)
+   ========================================================== */
 
 :root {
-  /* --- Light palette --- */
   --bg: #fafcfd;
   --card: #ffffff;
   --text: #0f1a2a;
   --muted: #5c6b79;
-  --primary: #7bc8ff;   /* brighter blue */
-  --accent1: #fff7c2;   /* soft yellow */
-  --accent2: #c6f5d6;   /* soft green */
+  --primary: #7bc8ff;
+  --accent1: #fff7c2;
+  --accent2: #c6f5d6;
   --border: #e8eef5;
-  --shadow: 0 4px 18px rgba(15, 26, 42, 0.08);
+  --shadow: 0 4px 18px rgba(15, 26, 42, .08);
 
   --radius: 14px;
-  --transition: 0.25s ease;
-
   --btn-h: 44px;
   --btn-w: 260px;
+  --btn-font: 'Inter', 'Segoe UI', 'Roboto', sans-serif;
 
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, Liberation Sans, sans-serif;
+  /* ✨ Typo boutons : variables ajoutées */
+  --btn-font-size: 1rem;
+  --btn-font-weight: 600;
+  --btn-letter-spacing: .01em;
+
   color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, Liberation Sans, sans-serif;
+
+  /* fade animation duration */
+  --theme-transition: .35s;
 }
 
-/* --- Dark Mode Foundation --- */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #11151b;
-    --card: #18202a;
-    --text: #f4f6fa;
-    --muted: #a9b4bf;
-    --primary: #4fa8ff;
-    --accent1: #665e1d;
-    --accent2: #1f4f32;
-    --border: #26303b;
-    --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  }
+/* Dark theme palette */
+html[data-theme="dark"] {
+  --bg: #10151b;
+  --card: #18212b;
+  --text: #f4f6fa;
+  --muted: #a9b4bf;
+  --primary: #4fa8ff;
+  --accent1: #665e1d;
+  --accent2: #1f4f32;
+  --border: #2b3541;
+  --shadow: 0 4px 16px rgba(0, 0, 0, .45);
 }
 
-/* ==================== Reset & base ==================== */
+/* Smooth fade for global colors */
+html,
+body,
+.card,
+.button,
+.btn-nav,
+.badge,
+.nav,
+.icon-btn {
+  transition:
+    background-color var(--theme-transition) ease,
+    color var(--theme-transition) ease,
+    border-color var(--theme-transition) ease,
+    box-shadow var(--theme-transition) ease;
+}
+
+/* ==== Base ==== */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   background: var(--bg);
   color: var(--text);
   line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
   scroll-behavior: smooth;
 }
 
-h1, h2, h3, h4, h5 {
-  margin: 0.5em 0;
-  line-height: 1.2;
+h1,
+h2,
+h3,
+h4,
+h5 {
+  margin: .6em 0;
+  line-height: 1.25;
 }
 
 a {
   color: var(--primary);
   text-decoration: none;
-  transition: opacity var(--transition);
+  transition: opacity .25s;
 }
-a:hover { opacity: 0.85; }
 
-/* ==================== Layout / cards ==================== */
+a:hover {
+  opacity: .85;
+}
+
+.text-muted {
+  color: var(--muted);
+}
+
+/* ==== Layout ==== */
 .container {
   max-width: 1100px;
   margin: 20px auto;
@@ -83,114 +114,245 @@ a:hover { opacity: 0.85; }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 16px;
-  transition: box-shadow var(--transition), transform 0.12s ease;
+  transition: transform .15s, box-shadow .25s;
 }
+
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(15, 26, 42, 0.1);
+  box-shadow: 0 6px 20px rgba(15, 26, 42, .1);
 }
+
 .card.subtle {
-  background: color-mix(in srgb, var(--card) 90%, var(--bg) 10%);
+  background: color-mix(in srgb, var(--card) 92%, var(--bg) 8%);
 }
 
-.text-muted { color: var(--muted); }
-
-/* ==================== Buttons ==================== */
-.button, .btn-nav, .badge {
+/* ==== Buttons & Pills ==== */
+.button,
+.btn-nav,
+.badge,
+.checkbox-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: var(--btn-h);
-  padding: 0 16px;
+  padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, var(--primary) 20%);
-  background: linear-gradient(90deg, #f1faff, #f9fff9);
+  border: 1px solid #cde6ff;
+  background: linear-gradient(90deg, #e9f4ff, #f2fff6);
   color: var(--text);
   cursor: pointer;
-  transition: background var(--transition), transform 0.1s ease, box-shadow var(--transition);
   text-decoration: none;
+  transition: transform .08s ease, box-shadow .2s, border-color .2s, background .2s;
+  font-family: var(--btn-font);
 }
 
-.button:hover, .btn-nav:hover {
+.button:hover,
+.btn-nav:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow);
 }
 
-/* Variants */
 .button.secondary {
   background: linear-gradient(90deg, #f8fbff, #fffef2);
+  border-color: #e6edf6;
 }
-.button.danger, .btn-nav.danger {
-  background: linear-gradient(90deg, #ffe9e9, #fff4f4);
-  border-color: #f3c3c3;
+
+.button.small {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: var(--btn-font-size); /* même taille de texte que les autres */
+}
+
+.button.danger,
+.btn-nav.danger {
+  background: linear-gradient(90deg, #ffe9e9, #fff3f3);
+  border-color: #f5c2c2;
   color: #7a1d1d;
 }
+
 .btn-nav.success {
-  background: linear-gradient(90deg, #e8fff2, #dcffe8);
+  background: linear-gradient(90deg, #e6fff1, #ddffe8);
   border-color: #b8f0c5;
   color: #0e5a2f;
 }
-.badge {
-  background: #eef6ff;
-  border: 1px solid #d9e7f8;
-  font-size: 0.9rem;
-  padding: 0 10px;
-  line-height: 1.2;
+
+.button.spotify {
+  background: linear-gradient(90deg, #e8fff1, #dbffe4);
+  border: 1px solid #b8f0c5;
+  color: #0e5a2f;
 }
 
-/* ==================== Forms ==================== */
-label { font-weight: 600; display: block; margin: 6px 0; }
+.button.spotify.connected {
+  background: linear-gradient(90deg, #b7f3c8, #8ee6a6);
+  border-color: #66d18a;
+  color: #083e20;
+}
 
-.input, .textarea, select {
+/* ✅ Typo unifiée et plus “premium” pour tous les boutons */
+.button,
+.btn-nav {
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
+  line-height: 1.1;
+  letter-spacing: var(--btn-letter-spacing);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Forcer l'égalité sur toutes les variantes de boutons */
+.button.danger,
+.btn-nav.danger,
+.button.secondary,
+.button.spotify,
+.button.spotify.connected {
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
+  letter-spacing: var(--btn-letter-spacing);
+}
+
+.badge {
+  background: #eef7ff;
+  border: 1px solid #d8e6f7;
+  font-size: .9rem;
+  padding: 0 10px;
+}
+
+.badge.media {
+  padding: 4px 6px;
+}
+
+/* 🎯 .badge.user = même apparence que .button, mais non interactive */
+.badge.user {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--btn-h);
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #cde6ff;
+  background: linear-gradient(90deg, #e9f4ff, #f2fff6);
+  color: var(--text);
+  font-family: var(--btn-font);
+  font-size: var(--btn-font-size);
+  font-weight: var(--btn-font-weight);
+  letter-spacing: var(--btn-letter-spacing);
+  white-space: nowrap;
+  gap: 6px;
+  cursor: default;   /* pas cliquable */
+  text-decoration: none;
+  box-shadow: none;
+}
+
+/* ==== Checkbox / Chips ==== */
+.checkbox-pill {
+  gap: 8px;
+  border: 1px solid #e6edf6;
+  background: #fff;
+  user-select: none;
+}
+
+.checkbox-pill input {
+  accent-color: #65d091;
+}
+
+.chip-stack {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #e6edf6;
+  background: #fff;
+}
+
+.chip-x {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: .6;
+}
+
+.chip-x:hover {
+  opacity: 1;
+}
+
+/* ==== Forms ==== */
+label {
+  display: block;
+  font-weight: 700;
+  margin: 6px 0;
+}
+
+.input,
+.textarea,
+select {
   width: 100%;
-  border: 1px solid #dfe7f1;
+  border: 1px solid #dfe9f4;
   border-radius: 12px;
   padding: 10px 12px;
   background: #fff;
-  transition: border var(--transition), box-shadow var(--transition);
+  transition: box-shadow .15s, border-color .15s;
 }
-.input:focus, .textarea:focus, select:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(123,200,255,0.25);
-}
-.textarea { resize: vertical; min-height: 120px; }
 
-/* Validity helpers */
+.input:focus,
+.textarea:focus,
+select:focus {
+  border-color: #a6d4ff;
+  box-shadow: 0 0 0 3px rgba(104, 182, 255, .2);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
 .input.is-valid {
   border-color: #86e49c !important;
-  box-shadow: 0 0 0 3px rgba(134,228,156,.25) !important;
-}
-.input.is-invalid {
-  border-color: #f3b0b0 !important;
-  box-shadow: 0 0 0 3px rgba(245,143,143,.20) !important;
+  box-shadow: 0 0 0 3px rgba(134, 228, 156, .25) !important;
 }
 
-/* ==================== Nav ==================== */
+.input.is-invalid {
+  border-color: #f3b0b0 !important;
+  box-shadow: 0 0 0 3px rgba(245, 143, 143, .20) !important;
+}
+
+/* ==== Nav ==== */
 .nav {
   position: sticky;
   top: 0;
-  z-index: 20;
-  background: linear-gradient(90deg, #e9f4ff, #f6fff2);
+  z-index: 10;
+  background: linear-gradient(90deg, #e8f3ff, #f6ffe9);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(8px);
 }
-@media (prefers-color-scheme: dark) {
-  .nav {
-    background: linear-gradient(90deg, #1a232e, #1e2a1e);
-  }
-}
+
 .nav-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
 }
+
 .brand a {
   font-weight: 800;
   color: var(--text);
 }
 
-/* Icons and menu */
+.nav-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -198,58 +360,96 @@ label { font-weight: 600; display: block; margin: 6px 0; }
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid #dfe9f4;
+  background: #fff;
   cursor: pointer;
-  transition: transform .1s ease, box-shadow var(--transition);
+  transition: transform .06s, box-shadow .2s, border-color .2s;
 }
-.icon-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+
+.icon-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+  border-color: #b7d6ff;
+}
 
 .nav-menu {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  padding: 8px 16px;
-  gap: 10px;
-  transition: max-height 0.3s ease;
-}
-.nav-left, .nav-right {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
   align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  justify-content: space-between;
+  flex-wrap: nowrap;
 }
 
-/* Mobile collapse */
-.nav-toggle { display: none; }
-@media (max-width: 720px) {
-  .nav-toggle { display: inline-flex; }
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.nav-toggle {
+  display: none;
+}
+
+@media(max-width:720px) {
+  .nav-toggle {
+    display: inline-flex;
+  }
+
   .nav-menu {
     display: none;
     flex-direction: column;
-    gap: 10px;
-    padding-bottom: 14px;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 14px 14px;
   }
-  .nav-menu.open { display: flex; }
+
+  .nav-menu.open {
+    display: flex;
+  }
+
   .nav-menu.open .nav-left,
   .nav-menu.open .nav-right {
+    display: flex;
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-end;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .nav-menu.open .btn-nav,
+  .nav-menu.open .button,
+  .nav-menu.open .badge {
+    width: min(var(--btn-w), 100%);
+    height: var(--btn-h);
   }
 }
 
-/* ==================== Flash messages ==================== */
-.flash-list { margin: 16px auto; max-width: 900px; padding: 0 16px; }
+/* ==== Flash / Progress ==== */
+.flash-list {
+  margin: 14px auto;
+  max-width: 900px;
+  padding: 0 14px;
+}
+
 .flash {
-  background: linear-gradient(90deg, #fffbe5, #f0fff6);
-  border: 1px solid #f2e9b2;
+  background: linear-gradient(90deg, #fff9db, #f0fff3);
+  border: 1px solid #f2e8aa;
   padding: 10px 12px;
   border-radius: 12px;
   margin-bottom: 8px;
-  font-size: 0.95rem;
 }
 
-/* ==================== Utility elements ==================== */
 .progress {
   width: 100%;
   height: 10px;
@@ -258,34 +458,146 @@ label { font-weight: 600; display: block; margin: 6px 0; }
   border: 1px solid #e2ebf5;
   overflow: hidden;
 }
+
 .progress-bar {
   height: 100%;
   background: linear-gradient(90deg, #b7f3c8, #8ee6a6);
   transition: width .25s ease;
 }
 
-/* Cards grid */
-.grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+.inline-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-/* Responsive padding */
-@media (max-width: 720px) {
-  .container { padding: 0 12px; }
-  .card { padding: 14px; }
-  h1, h2, h3 { line-height: 1.25; }
-  .button, .btn-nav { width: 100%; }
+/* ==== Dark Mode Specific ==== */
+html[data-theme="dark"] body {
+  background: var(--bg);
+  color: var(--text);
 }
 
-/* ==================== Dark mode tweaks ==================== */
-@media (prefers-color-scheme: dark) {
-  body { background: var(--bg); color: var(--text); }
-  .card, .button, .btn-nav, .badge { background: var(--card); color: var(--text); }
-  .button.secondary, .button.danger, .btn-nav.danger {background: var(--card); color: var(--text); }
-  .button:hover, .btn-nav:hover, .button.danger, .btn-nav.danger { box-shadow: var(--shadow); }
-  .input, .textarea, select { background: #1f2833; color: var(--text); border-color: var(--border); }
-  .nav a, .brand a { color: var(--text); }
-  .flash { background: #262f3b; border-color: #33414f; color: var(--text); }
+html[data-theme="dark"] .card,
+.button,
+.btn-nav,
+.badge {
+  background: var(--card);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .button.secondary {
+  background: linear-gradient(90deg, #232c37, #252f3a);
+}
+
+html[data-theme="dark"] .button.danger {
+  background: linear-gradient(90deg, #3a1d1d, #432121);
+  color: #ffbcbc;
+}
+
+html[data-theme="dark"] .button.cancel {
+  background: linear-gradient(90deg, #20242a, #1c2227);
+  color: #a9b4bf;
+}
+
+html[data-theme="dark"] .nav {
+  background: linear-gradient(90deg, #1a232e, #1e2a1e);
+}
+
+html[data-theme="dark"] .icon-btn {
+  background: var(--card);
+  border-color: var(--border);
+  color: #f4f6fa;
+}
+
+/* Assurer l'égalité visuelle de .badge.user avec .button en dark */
+html[data-theme="dark"] .badge.user {
+  background: var(--card);
+  border-color: #cde6ff;
+  color: var(--text);
+}
+
+/* ==========================================================
+   ✨ Pastel v2+ Motion Layer (Slide-in & Fade-up)
+   ========================================================== */
+
+/* --- Base animation keyframes --- */
+@keyframes fadeSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Animate all cards and form containers --- */
+.card,
+.flash,
+.form-card,
+.grid>article {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: fadeSlideUp 0.6s ease forwards;
+  animation-delay: 0.1s;
+}
+
+/* --- Staggered grid animation for multiple cards --- */
+.grid>article:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.grid>article:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.grid>article:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.grid>article:nth-child(4) {
+  animation-delay: 0.25s;
+}
+
+.grid>article:nth-child(5) {
+  animation-delay: 0.3s;
+}
+
+/* --- Buttons / nav fade-in --- */
+.button,
+.btn-nav,
+.icon-btn {
+  transition:
+    background-color var(--theme-transition) ease,
+    color var(--theme-transition) ease,
+    border-color var(--theme-transition) ease,
+    box-shadow var(--theme-transition) ease,
+    transform 0.15s ease;
+}
+
+.button:active,
+.btn-nav:active,
+.icon-btn:active {
+  transform: scale(0.96);
+}
+
+/* --- Optional fade for section headings --- */
+h2,
+h3 {
+  opacity: 0;
+  animation: fadeSlideUp 0.7s ease forwards;
+  animation-delay: 0.05s;
+}
+
+/* --- Disable animations for users preferring reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

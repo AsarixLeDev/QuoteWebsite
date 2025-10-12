@@ -188,6 +188,37 @@ document.addEventListener('DOMContentLoaded', function(){
 <main class="container">
     {% block content %}{% endblock %}
 </main>
+<script>
+(function(){
+  const KEY = 'theme';
+  const html = document.documentElement;
+  const saved = localStorage.getItem(KEY);
+  const initial = saved || 'light'; // default light
+  if(initial === 'dark') html.dataset.theme = 'dark';
+
+  const navIcons = document.querySelector('.nav-icons');
+  if(navIcons){
+    const btn = document.createElement('button');
+    btn.className = 'icon-btn theme-toggle';
+    btn.title = 'Basculer le thème';
+    btn.textContent = html.dataset.theme === 'dark' ? '☀️' : '🌙';
+    btn.addEventListener('click', ()=>{
+      const dark = html.dataset.theme === 'dark';
+      if(dark){
+        html.removeAttribute('data-theme');
+        localStorage.setItem(KEY,'light');
+        btn.textContent = '🌙';
+      } else {
+        html.setAttribute('data-theme','dark');
+        localStorage.setItem(KEY,'dark');
+        btn.textContent = '☀️';
+      }
+    });
+    navIcons.appendChild(btn);
+  }
+})();
+</script>
+
 
 </body>
 </html>
