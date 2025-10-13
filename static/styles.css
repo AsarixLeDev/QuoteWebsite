@@ -28,6 +28,28 @@
 
   /* fade animation duration */
   --theme-transition: .35s;
+  --link: #2563eb;
+  /* valeurs par défaut si aucune catégorie n'est fournie */
+  --flash-bg: #fff9db;
+  --flash-border: #f2e8aa;
+  --flash-accent: #b08a00;
+
+  /* par catégorie */
+  --flash-info-bg: #eaf4ff;
+  --flash-info-border: #cde6ff;
+  --flash-info-accent: #2563eb;
+
+  --flash-success-bg: #e6fff1;
+  --flash-success-border: #b8f0c5;
+  --flash-success-accent: #1b7a4e;
+
+  --flash-warning-bg: #fff9db;
+  --flash-warning-border: #f2e8aa;
+  --flash-warning-accent: #b08a00;
+
+  --flash-danger-bg: #ffe9ee;
+  --flash-danger-border: #f5c2cd;
+  --flash-danger-accent: #b21e3a;
 }
 
 /* Dark theme palette */
@@ -41,6 +63,27 @@ html[data-theme="dark"] {
   --accent2: #1f4f32;
   --border: #2b3541;
   --shadow: 0 4px 16px rgba(0, 0, 0, .45);
+  --link: #4fa8ff;
+  --flash-bg: #1b2330;
+  --flash-border: #2e3a4a;
+  --flash-accent: #4fa8ff;
+
+  /* par catégorie (fonds sombres + accent lisible) */
+  --flash-info-bg: #132135;
+  --flash-info-border: #294b73;
+  --flash-info-accent: #4fa8ff;
+
+  --flash-success-bg: #0f1f17;
+  --flash-success-border: #285c44;
+  --flash-success-accent: #25c57a;
+
+  --flash-warning-bg: #2b2305;
+  --flash-warning-border: #6b5a1a;
+  --flash-warning-accent: #ffd66e;
+
+  --flash-danger-bg: #2a1317;
+  --flash-danger-border: #6f2a39;
+  --flash-danger-accent: #ff8fa3;
 }
 
 /* Smooth fade for global colors */
@@ -88,13 +131,16 @@ h5 {
 }
 
 a {
-  color: var(--primary);
+  color: var(--link);
   text-decoration: none;
   transition: opacity .25s;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1.5px;
 }
 
 a:hover {
-  opacity: .85;
+  opacity: .85;                          /* annule la règle précédente */
+  text-decoration-thickness: 2px;      /* feedback visuel sans baisser le contraste */
 }
 
 .text-muted {
@@ -443,12 +489,31 @@ select:focus {
 }
 
 .flash {
-  background: linear-gradient(90deg, #fff9db, #f0fff3);
-  border: 1px solid #f2e8aa;
-  padding: 10px 12px;
+  background: var(--flash-bg);
+  border: 1px solid var(--flash-border);
+  color: var(--text);                 /* garantit le contraste */
   border-radius: 12px;
+  padding: 10px 12px;
   margin-bottom: 8px;
+  position: relative;
+  /* barre d’accent à gauche pour encoder la catégorie */
+  border-left: 6px solid var(--flash-accent);
 }
+
+.flash.info    { --flash-bg: var(--flash-info-bg);    --flash-border: var(--flash-info-border);    --flash-accent: var(--flash-info-accent); }
+.flash.success { --flash-bg: var(--flash-success-bg); --flash-border: var(--flash-success-border); --flash-accent: var(--flash-success-accent); }
+.flash.warning { --flash-bg: var(--flash-warning-bg); --flash-border: var(--flash-warning-border); --flash-accent: var(--flash-warning-accent); }
+.flash.error,
+.flash.danger  { --flash-bg: var(--flash-danger-bg);  --flash-border: var(--flash-danger-border);  --flash-accent: var(--flash-danger-accent); }
+
+/* 5) Liens dans les flash (garde ton token de lien accessible) */
+.flash a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1.5px;
+}
+.flash a:hover { text-decoration-thickness: 2px; }
 
 .progress {
   width: 100%;
