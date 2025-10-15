@@ -1,0 +1,34 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Importer un texte</h2>
+<form method="post" enctype="multipart/form-data" class="card">
+  <label for="file">Fichier (.docx / .pdf / .txt / .md / .html / .zip)</label>
+  <input class="input" type="file" id="file" name="file" required>
+
+  <div style="margin-top:12px;">
+    <label class="checkbox-pill">
+      <input type="checkbox" name="default_allow" value="1">
+      <span>Public (visible à mes amis)</span>
+    </label>
+  </div>
+
+  {% if friends and friends|length %}
+  <div class="card subtle" style="margin-top:12px;">
+    <div style="font-weight:700; margin-bottom:6px;">Accorder l’accès à :</div>
+    <div class="chip-group">
+      {% for uname in friends %}
+        <label class="checkbox-pill">
+          <input type="checkbox" name="allowed_users" value="{{ uname }}">
+          <span>{{ uname }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:14px; display:flex; gap:8px;">
+    <button class="button" type="submit">Importer</button>
+    <a class="button secondary" href="{{ url_for('core.dashboard') }}">Annuler</a>
+  </div>
+</form>
+{% endblock %}

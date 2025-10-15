@@ -17,12 +17,20 @@ from routes_auth_account import auth_account_bp
 from routes_spotify import spotify_bp
 from routes_auth_reset import auth_reset_bp  # ajout
 from routes_friends import friends_bp
+from routes_exports import exports_bp
+from routes_imports import importer_bp
 from storage import (
     read_db, write_db,
     get_user, list_users, add_user, set_user_password,
     set_admin_username, set_admin_password,
 )
 from werkzeug.exceptions import RequestEntityTooLarge
+import hashlib, time
+from pathlib import Path
+from flask import url_for
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 
 
 def create_app() -> Flask:
@@ -92,6 +100,8 @@ def create_app() -> Flask:
     app.register_blueprint(auth_account_bp)
     app.register_blueprint(auth_reset_bp)  # <<-- AJOUT
     app.register_blueprint(friends_bp)
+    app.register_blueprint(exports_bp)
+    app.register_blueprint(importer_bp)
     jobs.init_app(app)
     return app
 
@@ -145,6 +155,24 @@ def cli_main(argv=None) -> None:
     if not args.cmd or args.cmd == "run":
         ensure_admin_seed()
         app = create_app()
+
+        def _asset_fingerprint(relpath: str) -> str:
+            try:
+                p = (STATIC_DIR / relpath).resolve()
+                data = p.read_bytes()
+                return hashlib.md5(data).hexdigest()[:10]
+            except Exception:
+                # fallback (change toutes les heures si le fichier est introuvable)
+                return str(int(time.time() // 3600))
+
+        @app.context_processor
+        def inject_static_f():
+            def static_f(relpath: str) -> str:
+                ver = _asset_fingerprint(relpath.strip("/"))
+                return url_for("static", filename=relpath) + f"?v={ver}"
+
+            return {"static_f": static_f}
+
         app.run(
             host=getattr(args, "host", "127.0.0.1"),
             port=getattr(args, "port", 5000),

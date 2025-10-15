@@ -142,6 +142,9 @@
   <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
     {% set is_owner = (text.created_by is defined and text.created_by == current_user.get_id()) %}
     {% if is_owner %}
+      <a class="button" href="{{ url_for('exports.export_text_pdf', text_id=text.id) }}">Exporter PDF</a>
+<a class="button secondary" href="{{ url_for('exports.export_text_docx', text_id=text.id) }}">Exporter Word</a>
+
       <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=text.id) }}">Modifier</a>
       <form method="post" action="{{ url_for('texts.delete_text', text_id=text.id) }}"
             onsubmit="return confirm('Supprimer ce texte ?');" style="margin:0;">

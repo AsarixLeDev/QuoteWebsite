@@ -1,0 +1,14 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Exporter « {{ text.title or '(sans titre)' }} »</h2>
+<div class="card">
+  <p class="text-muted">Choisis un format d’export. Le contenu sera déchiffré pour l’export puis re‑chiffré à l’import.</p>
+  <div class="inline-actions" style="margin-top:8px;">
+    <a class="button" href="{{ url_for('exports.export_docx', text_id=text.id) }}">Word (.docx)</a>
+    <a class="button" href="{{ url_for('exports.export_pdf', text_id=text.id) }}">PDF (.pdf)</a>
+  </div>
+  <hr>
+  <p class="text-muted">Astuce : le DOCX contient une métadonnée PNMETA pour une réimport parfaite. Le PDF sera importé « au mieux ».</p>
+  <a class="button secondary" href="{{ url_for('texts.view_text', text_id=text.id) }}">Retour</a>
+</div>
+{% endblock %}
