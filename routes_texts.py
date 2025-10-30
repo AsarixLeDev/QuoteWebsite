@@ -405,7 +405,7 @@ def new_text():
         # Chiffrement (titre/corps/contexte)
         import crypto_server as cserv
         clear = {"title": title, "body": body, "context": context_val}
-        enc = cserv.encrypt_text_payload(current_user.get_id(), clear)
+        enc = cserv.encrypt_text_payload(clear)
 
         # Création SQL
         text_id = store.create_text(
@@ -580,7 +580,7 @@ def edit_text(text_id: int):
     # chiffrement
     import crypto_server as cserv
     clear = {"title": title, "body": body, "context": context_val}
-    enc = cserv.encrypt_text_payload(t["created_by"], clear)
+    enc = cserv.encrypt_text_payload(clear)
 
     payload = {
         "cipher_alg": enc["cipher_alg"],
