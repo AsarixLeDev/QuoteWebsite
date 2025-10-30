@@ -464,7 +464,7 @@ def edit_text(text_id: int):
         title, body, context = t.get("title"), t.get("body"), t.get("context")
         if t.get("ciphertext") and t.get("cipher_nonce"):
             try:
-                clear = cserv.decrypt_text_payload(t["created_by"], t["ciphertext"], t["cipher_nonce"])
+                clear = cserv.compat_decrypt_and_rewrap_row(t)
                 title = clear.get("title") or title
                 body = clear.get("body")
                 context = clear.get("context")
