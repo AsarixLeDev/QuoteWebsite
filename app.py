@@ -79,6 +79,7 @@ def create_app() -> Flask:
     if not os.path.isfile(css_path):
         print(f"[WARN] styles.css introuvable : {css_path}")
 
+    # 413 -> redirect
     def _handle_413(e):
         from flask import request, redirect, url_for, flash
         cap = app.config.get('MAX_CONTENT_LENGTH') or 0
@@ -90,6 +91,30 @@ def create_app() -> Flask:
 
     app.register_error_handler(RequestEntityTooLarge, _handle_413)
 
+    # ----> déplacer ici le fingerprint + le context_processor
+    import hashlib, time
+    from pathlib import Path
+    from flask import url_for
+
+    STATIC_DIR = Path(app.static_folder)
+
+    def _asset_fingerprint(relpath: str) -> str:
+        try:
+            p = (STATIC_DIR / relpath).resolve()
+            data = p.read_bytes()
+            return hashlib.md5(data).hexdigest()[:10]
+        except Exception:
+            # fallback (change toutes les heures si le fichier est introuvable)
+            return str(int(time.time() // 3600))
+
+    @app.context_processor
+    def inject_static_f():
+        def static_f(relpath: str) -> str:
+            ver = _asset_fingerprint(relpath.strip("/"))
+            return url_for("static", filename=relpath) + f"?v={ver}"
+        return {"static_f": static_f}
+    # <---- fin déplacement
+
     # Auth
     from auth import init_login
     init_login(app)
@@ -99,11 +124,12 @@ def create_app() -> Flask:
     app.register_blueprint(texts_bp)
     app.register_blueprint(spotify_bp)
     app.register_blueprint(auth_account_bp)
-    app.register_blueprint(auth_reset_bp)  # <<-- AJOUT
+    app.register_blueprint(auth_reset_bp)
     app.register_blueprint(friends_bp)
     app.register_blueprint(exports_bp)
     app.register_blueprint(importer_bp)
     app.register_blueprint(account_bp)
+
     jobs.init_app(app)
     return app
 
@@ -157,23 +183,6 @@ def cli_main(argv=None) -> None:
     if not args.cmd or args.cmd == "run":
         ensure_admin_seed()
         app = create_app()
-
-        def _asset_fingerprint(relpath: str) -> str:
-            try:
-                p = (STATIC_DIR / relpath).resolve()
-                data = p.read_bytes()
-                return hashlib.md5(data).hexdigest()[:10]
-            except Exception:
-                # fallback (change toutes les heures si le fichier est introuvable)
-                return str(int(time.time() // 3600))
-
-        @app.context_processor
-        def inject_static_f():
-            def static_f(relpath: str) -> str:
-                ver = _asset_fingerprint(relpath.strip("/"))
-                return url_for("static", filename=relpath) + f"?v={ver}"
-
-            return {"static_f": static_f}
 
         app.run(
             host=getattr(args, "host", "127.0.0.1"),
