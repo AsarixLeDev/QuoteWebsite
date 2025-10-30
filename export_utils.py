@@ -212,6 +212,45 @@ _HTML_FLEX = """\
     }
   }
   @page { size: A4; margin: 0; }     /* Aucune marge PDF */
+  *, *::before, *::after { box-sizing: border-box; }
+
+  img, svg, video { max-width: 100%%; height: auto; }
+
+  .body{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;  /* force la coupure si besoin */
+    word-break: break-word;
+  }
+  .paper{
+    width:210mm;
+    max-width:210mm;   /* empêche l’élargissement accidentel */
+   overflow:hidden;   /* coupe tout dépassement résiduel */
+  }
+  /* 1) Empêcher l'overflow dû au flex */
+.main{
+  flex: 1 1 auto;
+  padding: 18px 28px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;              /* <-- crucial en flex */
+}
+
+/* 2) Forcer la casse des contenus longs (URLs, mots sans espaces) */
+.content, .block, .body{
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 3) Les liens très longs (Spotify) */
+.content a{
+  word-break: break-all;     /* casse même au milieu si nécessaire */
+  text-decoration: underline;
+}
+
+/* 4) Sécurité images/medias et coupe dure si un truc dépasse encore */
+img, svg, video{ max-width:100%%; height:auto }
+.paper{ max-width:210mm; overflow:hidden }
 </style>
 </head>
 <body>
@@ -262,7 +301,39 @@ _HTML_FLEX = """\
 </body>
 </html>
 """
+import subprocess, tempfile, shutil, os, sys
+from pathlib import Path
 
+def _find_chromium_bin() -> str:
+    # Essaie plusieurs noms courants
+    for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+        p = shutil.which(name)
+        if p:
+            return p
+    raise FileNotFoundError("Chromium introuvable dans le PATH")
+
+def _render_pdf_with_system_chromium(html_str: str) -> bytes:
+    print("[export][pdf] engine=chromium-cli")  # DEBUG
+    chromium = _find_chromium_bin()
+    with tempfile.TemporaryDirectory() as td:
+        html_path = Path(td) / "export.html"
+        pdf_path  = Path(td) / "export.pdf"
+        html_path.write_text(html_str, encoding="utf-8")
+
+        # Important: --no-sandbox en VPS; --disable-dev-shm-usage pour environnements limités
+        cmd = [
+            chromium,
+            "--headless=new",         # fallback: --headless si ta version ne connaît pas 'new'
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            f"--print-to-pdf={pdf_path}",
+            "--print-to-pdf-no-header",
+            "--run-all-compositor-stages-before-draw",
+            str(html_path),
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return pdf_path.read_bytes()
 
 def build_export_html(
     text: Dict[str, Any],
@@ -369,14 +440,39 @@ def export_pdf_bytes(
         return _render_pdf_with_playwright(html_str)
     except Exception as e:
         errors.append(f"Playwright: {e}")
+        print(e)
+
+        # 1bis) Chromium système (sans Playwright)
+    try:
+        return _render_pdf_with_system_chromium(html_str)
+    except Exception as e:
+        errors.append(f"Chromium-CLI: {e}")
+        print(e)
 
     # 2) WeasyPrint
     try:
-        from weasyprint import HTML  # type: ignore
-        print("[export][pdf] engine=weasyprint")  # DEBUG
-        return HTML(string=html_str, base_url=base_url or ".").write_pdf()
+        from weasyprint import HTML, CSS
+        print("[export][pdf] engine=weasyprint")
+        weasy_overrides = """
+          @page { size: A4; margin: 0 }
+          html, body { margin:0; padding:0 }
+          .paper{
+            width: 210mm;
+            /* Laisse WeasyPrint gérer la hauteur/pagination */
+            height: auto !important;
+            min-height: auto !important;
+            display: block !important;   /* flex -> block pour éviter la page vide */
+          }
+          .main{ display:block !important; }
+          .side{ float:left; width:120px; }      /* layout simple côté Weasy */
+          .main{ margin-left:120px; }
+        """
+        return HTML(string=html_str, base_url=base_url or ".").write_pdf(
+            stylesheets=[CSS(string=weasy_overrides)]
+        )
     except Exception as e:
         errors.append(f"WeasyPrint: {e}")
+        print(e)
 
     # 3) wkhtmltopdf/pdfkit
     try:
@@ -396,6 +492,7 @@ def export_pdf_bytes(
         return pdfkit.from_string(html_str, False, options=opts)
     except Exception as e:
         errors.append(f"pdfkit: {e}")
+        print(e)
 
     raise RuntimeError("Impossible de générer le PDF. " + " | ".join(errors))
 
