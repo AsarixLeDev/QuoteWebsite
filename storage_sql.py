@@ -210,7 +210,7 @@ def get_user(username: str) -> Optional[Dict[str, Any]]:
         u = s.scalar(select(User).where(sa.func.lower(User.username) == username.strip().lower()))
         if not u:
             return None
-        return {"username": u.username, "is_admin": u.is_admin, "created_at": u.created_at.isoformat()}
+        return {"username": u.username, "is_admin": u.is_admin, "created_at": u.created_at.isoformat(), "email": u.email}
 
 def list_users() -> List[Dict[str, Any]]:
     with SessionLocal() as s:

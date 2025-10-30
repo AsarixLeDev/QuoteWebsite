@@ -75,16 +75,111 @@ def reset_with_token(token: str):
             return redirect(url_for("auth.login"))
     return render_template("account_reset.html", token=token)
 
-def _send_reset_email(user, token: str):
+# routes_account.py (remplace _send_reset_email)
+from email.message import EmailMessage
+from email.utils import formataddr
+import smtplib
+import os
+import html as pyhtml
+
+def _send_reset_email(user, link: str):
     """
-    Minimal sender:
-    - If SMTP configured -> send an email
-    - Else: log the URL to console (and flash generic message)
+    Envoie un email de réinitialisation.
+    - Lit la config SMTP depuis data.json -> conf["smtp"] (host, port, username, password, use_tls, use_ssl, from_addr, from_name)
+      Fallback sur variables d'env (SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_USE_TLS, SMTP_USE_SSL,
+      SMTP_FROM_ADDR, SMTP_FROM_NAME).
+    - Si pas de config valide -> log/print le lien et return.
     """
+
+    # 2) Récup config
     try:
-        base = request.url_root.rstrip("/")
+        from storage import read_db, get_conf
+        conf = (get_conf(read_db()) or {})
+        smtp = (conf.get("smtp") or {})
+        site_name = (conf.get("site_name") or "PastelNotes")
     except Exception:
-        base = ""
-    link = f"{base}/account/password/reset/{token}"
-    print("Reset link for %s: %s", user.username, link)
-    # TODO: integrate your SMTP settings; until then, link is in logs.
+        smtp, site_name = {}, "PastelNotes"
+
+    print(user)
+
+    host      = smtp.get("host")      or os.getenv("SMTP_HOST")
+    port      = int(smtp.get("port") or os.getenv("SMTP_PORT") or 587)
+    username  = smtp.get("username")  or os.getenv("SMTP_USERNAME")
+    password  = smtp.get("password")  or os.getenv("SMTP_PASSWORD")
+    use_tls   = bool(smtp.get("use_tls", True if os.getenv("SMTP_USE_TLS") is None else os.getenv("SMTP_USE_TLS") == "1"))
+    use_ssl   = bool(smtp.get("use_ssl", os.getenv("SMTP_USE_SSL") == "1"))
+    from_addr = smtp.get("from_addr") or os.getenv("SMTP_FROM_ADDR") or (username or "")
+    from_name = smtp.get("from_name") or os.getenv("SMTP_FROM_NAME") or site_name
+
+    to_addr   = user["email"] if "email" in user else None
+
+    print(to_addr, host, from_addr)
+
+    # 3) Fallback si pas d'email destinataire ou pas de config SMTP
+    if not to_addr or not host or not from_addr:
+        # Pas d'email ou pas de config : on logge le lien (comportement sûr en dev)
+        try:
+            # Flask logger si dispo
+            from flask import current_app
+            current_app.logger.info("Reset link for %s: %s", getattr(user, "username", "?"), link)
+        except Exception as e:
+            print(e)
+            pass
+        print("Reset link for %s: %s" % (getattr(user, "username", "?"), link))
+        return
+
+    # 4) Construire le message (texte + HTML)
+    subj = f"[{site_name}] Réinitialisation de votre mot de passe"
+    safe_user = pyhtml.escape(getattr(user, "username", ""))
+    text_body = (
+        f"Bonjour {safe_user or ''},\n\n"
+        f"Vous avez demandé la réinitialisation de votre mot de passe sur {site_name}.\n"
+        f"Cliquez sur le lien ci-dessous (valide 2 heures) :\n\n{link}\n\n"
+        "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email."
+    )
+    html_body = (
+        f"<p>Bonjour {safe_user or ''},</p>"
+        f"<p>Vous avez demandé la réinitialisation de votre mot de passe sur <strong>{pyhtml.escape(site_name)}</strong>.</p>"
+        f"<p><a href=\"{pyhtml.escape(link)}\" style=\"display:inline-block;padding:10px 14px;border-radius:6px;"
+        f"background:#2d8aa8;color:#fff;text-decoration:none\" target=\"_blank\">Réinitialiser mon mot de passe</a></p>"
+        f"<p>Ou copiez-collez ce lien dans votre navigateur :<br>"
+        f"<code style=\"word-break:break-all\">{pyhtml.escape(link)}</code></p>"
+        f"<p style=\"color:#6b7280;font-size:12px\">Ce lien est valable 2 heures.</p>"
+    )
+
+    msg = EmailMessage()
+    msg["Subject"] = subj
+    msg["From"] = formataddr((from_name, from_addr))
+    msg["To"] = to_addr
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+
+    print(username, password)
+
+    # 5) Envoi
+    try:
+        if use_ssl:
+            with smtplib.SMTP_SSL(host, port, timeout=20) as smtp_conn:
+                if username and password:
+                    smtp_conn.login(username, password)
+                smtp_conn.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as smtp_conn:
+                smtp_conn.ehlo()
+                if use_tls:
+                    smtp_conn.starttls()
+                    smtp_conn.ehlo()
+                if username and password:
+                    smtp_conn.login(username, password)
+                smtp_conn.send_message(msg)
+                print("Message sent")
+    except Exception as e:
+        # En cas d'échec, on log + on imprime le lien pour secours
+        try:
+            from flask import current_app
+            current_app.logger.exception("SMTP error while sending reset email: %s", e)
+            print("SMTP error while sending reset email: %s", e)
+        except Exception:
+            pass
+        print("SMTP sending failed; reset link for %s: %s" % (getattr(user, "username", "?"), link))
+

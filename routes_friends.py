@@ -79,7 +79,7 @@ def friend_texts(username: str):
         title, body, context = full.get("title"), None, None
         if full.get("ciphertext") and full.get("cipher_nonce"):
             try:
-                clear = cserv.decrypt_text_payload(full["created_by"], full["ciphertext"], full["cipher_nonce"])
+                clear = cserv.compat_decrypt_and_rewrap_row(full)
                 title   = clear.get("title") or title
                 body    = clear.get("body")
                 context = clear.get("context")
