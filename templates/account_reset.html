@@ -1,0 +1,13 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2>Définir un nouveau mot de passe</h2>
+<form method="post" class="card" style="max-width:520px">
+  <label>Nouveau mot de passe</label>
+  <input class="input" type="password" name="new_password" required>
+  <label>Confirmer</label>
+  <input class="input" type="password" name="new_password2" required>
+  <div style="margin-top:12px">
+    <button class="button" type="submit">Enregistrer</button>
+  </div>
+</form>
+{% endblock %}

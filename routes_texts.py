@@ -287,19 +287,21 @@ def view_text(text_id: int):
 
     # déchiffre pour l’affichage
     import crypto_server as cserv
-    title = t.get("title");
-    body = t.get("body");
-    context = t.get("context")
-    if t.get("ciphertext") and t.get("cipher_nonce"):
-        try:
-            clear = cserv.decrypt_text_payload(t["created_by"], t["ciphertext"], t["cipher_nonce"])
-            title = clear.get("title") or title
-            body = clear.get("body")
-            context = clear.get("context")
-        except Exception:
-            title = title or "(indéchiffrable)";
-            body = "(indéchiffrable)";
-            context = None
+    row = {
+        "id": t["id"],
+        "created_by": t["created_by"],
+        "cipher_alg": t.get("cipher_alg") or "AES-GCM-256-v1",
+        "ciphertext": t.get("ciphertext") or "",
+        "cipher_nonce": t.get("cipher_nonce") or "",
+    }
+    try:
+        clear = cserv.compat_decrypt_and_rewrap_row(row)
+        title = clear.get("title") or t.get("title")
+        body = clear.get("body")
+        context = clear.get("context")
+    except Exception as e:
+        print("decrypt failed on text %s: %s", t["id"], e)
+        title, body, context = (t.get("title") or "(indéchiffrable)"), None, None
     vm["title"] = title or "(sans titre)"
     vm["body"] = body
     vm["context"] = context
@@ -347,6 +349,10 @@ def new_text():
         title = _clean_opt(request.form.get("title"))
         body = request.form.get("body")
         context_val = _clean_opt(request.form.get("context"))
+
+        if not title or not title.strip():
+            flash("Le titre est requis.")
+            return render_template("text_form.html", is_new=True, users=usernames, text=None)
         if not body:
             flash("Le texte est requis.")
             return render_template("text_form.html", is_new=True, users=usernames, text=None)
@@ -493,6 +499,10 @@ def edit_text(text_id: int):
     title = _clean_opt(request.form.get("title"))
     body = request.form.get("body")
     context_val = _clean_opt(request.form.get("context"))
+
+    if not title or not title.strip():
+        flash("Le titre est requis.")
+        return redirect(url_for("texts.edit_text", text_id=text_id))
     if not body:
         flash("Le texte est requis.")
         return redirect(url_for("texts.edit_text", text_id=text_id))

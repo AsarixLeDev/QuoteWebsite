@@ -156,38 +156,10 @@ def _resolve_next_for_user(next_url: str | None, *, is_admin: bool, username: st
 
 # ------------------- Helpers -------------------
 
-def _safe_join(*parts: str) -> str:
-    return "/".join(p.strip("/\\") for p in parts if p)
-
 
 def _text_fingerprint(t: Dict[str, Any]) -> str:
     base = f"{t.get('title') or ''}\n{t.get('body') or ''}\n{t.get('date') or ''}\n{t.get('created_by') or ''}"
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
-
-
-def _copy_into_zip(z: zipfile.ZipFile, src_path, arcname: str) -> bool:
-    try:
-        z.write(src_path, arcname=arcname)
-        return True
-    except FileNotFoundError:
-        return False
-
-
-def _load_backup_payload(file_storage) -> tuple[Dict[str, Any], Optional[zipfile.ZipFile]]:
-    """Retourne (payload_json, zip_handle|None)."""
-    filename = (file_storage.filename or "").lower()
-    raw = file_storage.read()
-    file_storage.seek(0)
-    if filename.endswith(".zip"):
-        zf = zipfile.ZipFile(io.BytesIO(raw))
-        name = next((n for n in zf.namelist() if n.endswith("backup.json")), None)
-        if not name:
-            raise ValueError("Zip invalide: backup.json manquant.")
-        payload = json.loads(zf.read(name).decode("utf-8"))
-        return payload, zf
-    else:
-        payload = json.loads(raw.decode("utf-8"))
-        return payload, None
 
 
 def _import_assets_from_zip(zf: zipfile.ZipFile, arcpath: str) -> Optional[str]:
@@ -382,11 +354,16 @@ def dashboard():
             title = vm["title"]; body = vm["body"]; context = vm["context"]
             if full.get("ciphertext") and full.get("cipher_nonce"):
                 try:
-                    clear = cserv.decrypt_text_payload(
-                        full["created_by"], full["ciphertext"], full["cipher_nonce"]
-                    )
-                    title   = clear.get("title") or title
-                    body    = clear.get("body")
+                    row = {
+                        "id": full.get("id", vm["id"]),
+                        "created_by": full.get("created_by", vm["created_by"]),
+                        "cipher_alg": full.get("cipher_alg") or "AES-GCM-256-v1",
+                        "ciphertext": full.get("ciphertext") or "",
+                        "cipher_nonce": full.get("cipher_nonce") or "",
+                    }
+                    clear = cserv.compat_decrypt_and_rewrap_row(row)
+                    title = clear.get("title") or title
+                    body = clear.get("body")
                     context = clear.get("context")
                 except Exception:
                     current_app.logger.warning("decrypt failed on text %s", vm["id"], exc_info=True)

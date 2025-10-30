@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% block content %}
+<h2>Mot de passe oublié</h2>
+<form method="post" class="card" style="max-width:520px">
+  <label>Nom d’utilisateur ou e‑mail</label>
+  <input class="input" type="text" name="login" required>
+  <div style="margin-top:12px">
+    <button class="button" type="submit">Envoyer le lien</button>
+    <a class="button secondary" href="{{ url_for('auth.login') }}">Retour</a>
+  </div>
+</form>
+{% endblock %}

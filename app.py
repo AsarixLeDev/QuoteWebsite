@@ -19,6 +19,7 @@ from routes_auth_reset import auth_reset_bp  # ajout
 from routes_friends import friends_bp
 from routes_exports import exports_bp
 from routes_imports import importer_bp
+from routes_account import account_bp
 from storage import (
     read_db, write_db,
     get_user, list_users, add_user, set_user_password,
@@ -102,6 +103,7 @@ def create_app() -> Flask:
     app.register_blueprint(friends_bp)
     app.register_blueprint(exports_bp)
     app.register_blueprint(importer_bp)
+    app.register_blueprint(account_bp)
     jobs.init_app(app)
     return app
 

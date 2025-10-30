@@ -6,9 +6,10 @@
   <!-- Titre & Date -->
   <div class="form-row">
     <div>
-      <label for="title">Titre (optionnel)</label>
+      <label for="title">Titre <span style="color:#c43">*</span></label>
       <input class="input" id="title" name="title" type="text"
-             value="{{ (text.title or '') if text else '' }}" placeholder="(sans titre)">
+             value="{{ (text.title or '') if text else '' }}"
+             placeholder="Titre…" required>
     </div>
     <div>
       <label for="date">Date</label>
@@ -24,7 +25,7 @@
             placeholder="Contexte…">{{ (text.context or '') if text else '' }}</textarea>
 
   <!-- Corps -->
-  <label for="body" style="margin-top:10px;">Texte *</label>
+  <label for="body" style="margin-top:10px;">Texte <span style="color:#c43">*</span></label>
   <textarea class="textarea" id="body" name="body" rows="10" required
             placeholder="Écris ici…">{{ (text.body or '') if text else '' }}</textarea>
 

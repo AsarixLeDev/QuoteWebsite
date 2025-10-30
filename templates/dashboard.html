@@ -1,6 +1,20 @@
 {% extends 'layout.html' %}
 {% block content %}
-<h2 style="margin-bottom:10px;">Bonne lecture !</h2>
+
+<h2 style="margin-bottom:10px; padding:20px;">Bonne lecture !</h2>
+
+<!-- Search + Owner toggle -->
+<div class="card" style="margin-bottom:12px;">
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <input id="search-input" class="input" type="search"
+           placeholder="Rechercher… (titre, contexte, texte)"
+           autocomplete="off" spellcheck="false" />
+    <button id="my-toggle" class="button secondary" type="button" aria-pressed="false">Mes textes</button>
+  </div>
+  <div id="search-meta" class="text-muted" style="margin-top:6px; font-size:.9rem;">
+    Recherche par expression exacte (titre > contexte > texte).
+  </div>
+</div>
 
 {% if texts|length == 0 %}
   <div class="card">
@@ -8,88 +22,101 @@
     <p><a class="button" href="{{ url_for('texts.new_text') }}">Créer un premier texte</a></p>
   </div>
 {% else %}
-  <div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
+  <!-- GRID -->
+  <div id="cards" class="grid"
+       style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
+
     {% for t in texts %}
-      <article class="card" style="display:flex; flex-direction:column; gap:8px;">
-        <!-- En-tête -->
-        <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline; flex-wrap:wrap;">
-          <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
-          <div style="display:flex; gap:8px; align-items:center;">
-            {% if t.media_badge is defined and t.media_badge %}
-              <span class="badge {{ t.media_badge.class or '' }}" title="{{ t.media_badge.label }}">
-                {{ t.media_badge.icon }}
-              </span>
-            {% endif %}
-            {% if t.flags %}
-              {% for f in t.flags %}
-                <span class="badge" title="{{ f.label }}">{{ f.icon }}</span>
-              {% endfor %}
-            {% endif %}
-            <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
-          </div>
-        </div>
+    {% set is_owner = (t.created_by is defined and t.created_by == current_user.get_id()) %}
 
-        {% if t.created_by %}
-          <div class="text-muted" style="margin-top:-4px;">par {{ t.created_by }}</div>
-        {% endif %}
+    <article class="card"
+             data-card
+             data-ord="{{ loop.index0 }}"
+             data-date="{{ t.date_dt.isoformat() }}"
+             data-owner="{{ '1' if is_owner else '0' }}"
+             data-title="{{ (t.title or '') }}"
+             data-context="{{ (t.context or '') }}"
+             data-body="{{ (t.body or '') }}"
+             style="display:flex; flex-direction:column; gap:8px;">
 
-        <!-- Bloc job YouTube (si présent) -->
-        {% if t.yt_job_id %}
-          <div class="card subtle" data-job-id="{{ t.yt_job_id }}" style="margin-top:6px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-              <div><strong>Extraction audio YouTube</strong></div>
-              <div class="inline-actions">
-                <button class="button small danger btn-cancel">Annuler</button>
-                <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
-              </div>
-            </div>
-            <div class="progress" style="margin-top:6px;"><div class="progress-bar" style="width:0%"></div></div>
-            <div class="text-muted job-msg" style="margin-top:6px;">Préparation…</div>
-          </div>
-        {% endif %}
-
-        <!-- Image -->
-        {% if t.image_filename %}
-          <img alt="" src="{{ url_for('core.uploaded_file', filename=t.image_filename) }}"
-               style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
-        {% elif t.image_url %}
-          <img alt="" src="{{ t.image_url }}"
-               style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
-        {% endif %}
-
-        <!-- Contexte (legacy) -->
-        {% if t.context %}
-          <div class="text-muted" style="font-style:italic;">{{ t.context }}</div>
-        {% endif %}
-
-        <!-- Aperçu -->
-        {% if t.body %}
-          <p style="margin:0; white-space:pre-wrap; line-height:1.5; max-height:7.2em; overflow:hidden;">
-            {{ t.body[:300] }}{% if t.body|length > 300 %}…{% endif %}
-          </p>
-        {% else %}
-          <p class="text-muted" style="margin:0;">Contenu chiffré — ouvrir pour lire.</p>
-        {% endif %}
-
-        <!-- Actions -->
-        <div style="display:flex; gap:8px; margin-top:auto; flex-wrap:wrap; align-items:center;">
-          <a class="button" href="{{ url_for('texts.view_text', text_id=t.id) }}">Ouvrir</a>
-
-          {% set is_owner = (t.created_by is defined and t.created_by == current_user.get_id()) %}
-          {% if is_owner %}
-            <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=t.id) }}">Modifier</a>
-            <form method="post" action="{{ url_for('texts.delete_text', text_id=t.id) }}" style="margin:0;"
-                  onsubmit="return confirm('Supprimer ce texte ?');">
-              <button class="button danger" type="submit">Supprimer</button>
-            </form>
+      <!-- Header -->
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline; flex-wrap:wrap;">
+        <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
+        <div style="display:flex; gap:8px; align-items:center;">
+          {% if t.media_badge is defined and t.media_badge %}
+            <span class="badge {{ t.media_badge.class or '' }}" title="{{ t.media_badge.label }}">
+              {{ t.media_badge.icon }}
+            </span>
           {% endif %}
+          {% if t.flags %}
+            {% for f in t.flags %}
+              <span class="badge" title="{{ f.label }}">{{ f.icon }}</span>
+            {% endfor %}
+          {% endif %}
+          <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
         </div>
-      </article>
+      </div>
+
+      {% if t.created_by %}
+        <div class="text-muted" style="margin-top:-4px;">par {{ t.created_by }}</div>
+      {% endif %}
+
+      <!-- YT job widget -->
+      {% if t.yt_job_id %}
+      <div class="card subtle" data-job-id="{{ t.yt_job_id }}" style="margin-top:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+          <div><strong>Extraction audio YouTube</strong></div>
+          <div class="inline-actions">
+            <button class="button small danger btn-cancel">Annuler</button>
+            <button class="button small secondary btn-retry" style="display:none;">Relancer</button>
+          </div>
+        </div>
+        <div class="progress" style="margin-top:6px;"><div class="progress-bar" style="width:0%"></div></div>
+        <div class="text-muted job-msg" style="margin-top:6px;">Préparation…</div>
+      </div>
+      {% endif %}
+
+      <!-- Image -->
+      {% if t.image_filename %}
+        <img alt="" src="{{ url_for('core.uploaded_file', filename=t.image_filename) }}"
+             style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
+      {% elif t.image_url %}
+        <img alt="" src="{{ t.image_url }}"
+             style="width:100%; max-height:160px; object-fit:cover; border-radius:12px;">
+      {% endif %}
+
+      <!-- Context -->
+      {% if t.context %}
+        <div class="text-muted" style="font-style:italic;">{{ t.context }}</div>
+      {% endif %}
+
+      <!-- Excerpt -->
+      {% if t.body %}
+        <p style="margin:0; white-space:pre-wrap; line-height:1.5; max-height:7.2em; overflow:hidden;">
+          {{ t.body[:300] }}{% if t.body|length > 300 %}…{% endif %}
+        </p>
+      {% else %}
+        <p class="text-muted" style="margin:0;">Contenu chiffré — ouvrir pour lire.</p>
+      {% endif %}
+
+      <!-- Actions -->
+      <div class="actions" data-actions
+           style="display:flex; gap:8px; margin-top:auto; flex-wrap:wrap; align-items:center;">
+        <a class="button" href="{{ url_for('texts.view_text', text_id=t.id) }}">Ouvrir</a>
+        {% if is_owner %}
+          <a class="button secondary" href="{{ url_for('texts.edit_text', text_id=t.id) }}">Modifier</a>
+          <form method="post" action="{{ url_for('texts.delete_text', text_id=t.id) }}" style="margin:0;"
+                onsubmit="return confirm('Supprimer ce texte ?');">
+            <button class="button danger" type="submit">Supprimer</button>
+          </form>
+        {% endif %}
+      </div>
+    </article>
     {% endfor %}
   </div>
 {% endif %}
 
-<!-- Polling des jobs YT pour les cartes -->
+<!-- YT job polling -->
 <script>
 (function(){
   const cards = document.querySelectorAll('[data-job-id]');
@@ -142,8 +169,98 @@
       });
     }
   }
-
   cards.forEach(bind);
 })();
 </script>
+
+<!-- Phrase search + "Mes textes" filter + equalizer -->
+<script>
+(() => {
+  const input = document.getElementById('search-input');
+  const meta  = document.getElementById('search-meta');
+  const grid  = document.getElementById('cards');
+  const toggle= document.getElementById('my-toggle');
+  if (!input || !grid) return;
+
+  let ownerOnly = false;
+  const setToggleUI = () => {
+    if (!toggle) return;
+    toggle.classList.toggle('success', ownerOnly);
+    toggle.setAttribute('aria-pressed', ownerOnly ? 'true' : 'false');
+  };
+  if (toggle){
+    setToggleUI();
+    toggle.addEventListener('click', ()=>{ ownerOnly = !ownerOnly; setToggleUI(); apply(); });
+  }
+
+  // accent-insensitive
+  const fold = (s) => (s||"").toString().toLowerCase()
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
+  const getCards = () => Array.from(grid.querySelectorAll('[data-card]'));
+
+  function score(el, qf){
+    const t = fold(el.dataset.title||""),
+          c = fold(el.dataset.context||""),
+          b = fold(el.dataset.body||"");
+    const it=t.indexOf(qf), ic=c.indexOf(qf), ib=b.indexOf(qf);
+    if (it<0 && ic<0 && ib<0) return {score:0, pos:1e12};
+    let s=0; if(it>=0) s+=3; if(ic>=0) s+=2; if(ib>=0) s+=1;
+    const pos=Math.min(it>=0?it:1e12, ic>=0?ic:1e12, ib>=0?ib:1e12);
+    return {score:s, pos};
+  }
+
+  function restoreOriginal(cards){
+    const all = [...cards].sort((a,b)=> (+a.dataset.ord||0) - (+b.dataset.ord||0));
+    all.forEach(el=> grid.appendChild(el));
+  }
+
+  function equalizeVisible(){
+    const vis = getCards().filter(el => el.style.display !== 'none');
+    vis.forEach(el => el.style.height = 'auto');
+    let max = 0; vis.forEach(el => max = Math.max(max, el.offsetHeight));
+    vis.forEach(el => el.style.height = max + 'px');
+  }
+
+  function apply(){
+    const qf = fold((input.value||"").trim());
+    const all = getCards();
+
+    if (!qf && !ownerOnly){
+      all.forEach(el => { el.style.display=''; el.dataset.score="0"; el.dataset.pos=""; el.style.height='auto'; });
+      restoreOriginal(all);
+      if (meta) meta.textContent = 'Recherche par expression exacte (titre > contexte > texte).';
+      requestAnimationFrame(equalizeVisible);
+      return;
+    }
+
+    const visible = [];
+    for (const el of all){
+      if (ownerOnly && el.dataset.owner !== '1'){ el.style.display='none'; continue; }
+      if (!qf){ el.style.display=''; visible.push(el); continue; }
+      const r = score(el, qf);
+      el.dataset.score = String(r.score); el.dataset.pos = String(r.pos);
+      if (r.score>0){ el.style.display=''; visible.push(el); } else el.style.display='none';
+    }
+
+    visible.sort((a,b)=>{
+      const sa=+(a.dataset.score||0), sb=+(b.dataset.score||0);
+      if (sb!==sa) return sb-sa;
+      const pa=+(a.dataset.pos||1e12), pb=+(b.dataset.pos||1e12);
+      if (pa!==pb) return pa-pb;
+      const da=Date.parse(a.dataset.date||'')||0, db=Date.parse(b.dataset.date||'')||0;
+      return db-da;
+    });
+
+    visible.forEach(el=> grid.appendChild(el));
+    if (meta) meta.textContent =
+      `${visible.length} résultat(s) — ${ownerOnly?'Mes textes · ':''}recherche par expression exacte.`;
+    requestAnimationFrame(equalizeVisible);
+  }
+
+  input.addEventListener('input', apply);
+  window.addEventListener('resize', () => requestAnimationFrame(equalizeVisible));
+})();
+</script>
+
 {% endblock %}

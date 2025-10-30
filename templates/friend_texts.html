@@ -2,12 +2,83 @@
 {% block content %}
 <h2>Textes de {{ friend }}</h2>
 
+<div class="card" style="margin-bottom:12px;">
+  <input id="search-input" class="input" type="search"
+         placeholder="Rechercher… (titre, contexte, texte)"
+         autocomplete="off" spellcheck="false" />
+  <div id="search-meta" class="text-muted" style="margin-top:6px; font-size:.9rem;">
+    Recherche par expression exacte (titre > contexte > texte).
+  </div>
+
+  <script>
+(() => {
+  const input = document.getElementById('search-input');
+  const meta  = document.getElementById('search-meta');
+  const grid  = document.getElementById('cards');
+  if (!input || !grid) return;
+
+  const fold = (s) => (s||"").toString().toLowerCase()
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
+  function cards(){ return Array.from(grid.querySelectorAll('[data-card]')); }
+
+  function score(el, qf){
+    const t = fold(el.dataset.title||""),
+          c = fold(el.dataset.context||""),
+          b = fold(el.dataset.body||"");
+    const it=t.indexOf(qf), ic=c.indexOf(qf), ib=b.indexOf(qf);
+    if (it<0 && ic<0 && ib<0) return {score:0, pos:1e12};
+    let s=0; if(it>=0) s+=3; if(ic>=0) s+=2; if(ib>=0) s+=1;
+    const pos = Math.min(it>=0?it:1e12, ic>=0?ic:1e12, ib>=0?ib:1e12);
+    return {score:s, pos};
+  }
+
+  function apply(){
+    const qf = fold((input.value||"").trim());
+    const all = cards();
+
+    if(!qf){
+      all.forEach(el=>{ el.style.display=''; el.dataset.score="0"; el.dataset.pos=""; });
+      // restore original order as rendered by server
+      all.forEach(el=> grid.appendChild(el));
+      if(meta) meta.textContent = 'Recherche par expression exacte (titre > contexte > texte).';
+      return;
+    }
+
+    const vis=[];
+    for(const el of all){
+      const r = score(el,qf);
+      el.dataset.score = r.score; el.dataset.pos = r.pos;
+      if(r.score>0){ el.style.display=''; vis.push(el); } else el.style.display='none';
+    }
+    vis.sort((a,b)=>{
+      const sa=+(a.dataset.score||0), sb=+(b.dataset.score||0);
+      if(sb!==sa) return sb-sa;
+      const pa=+(a.dataset.pos||1e12), pb=+(b.dataset.pos||1e12);
+      if(pa!==pb) return pa-pb;
+      const da=Date.parse(a.dataset.date||'')||0, db=Date.parse(b.dataset.date||'')||0;
+      return db-da;
+    });
+    vis.forEach(el=> grid.appendChild(el));
+    if(meta) meta.textContent = `${vis.length} résultat(s).`;
+  }
+
+  input.addEventListener('input', apply);
+})();
+</script>
+</div>
+
 {% if texts|length == 0 %}
   <div class="card"><p class="text-muted">Aucun texte visible.</p></div>
 {% else %}
   <div class="grid" style="display:grid; gap:12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
     {% for t in texts %}
-      <article class="card" style="display:flex; flex-direction:column; gap:8px;">
+      <article class="card"
+           data-card
+           data-date="{{ t.date_dt.isoformat() }}"
+           data-title="{{ (t.title or '')|lower }}"
+           data-context="{{ (t.context or '')|lower }}"
+           data-body="{{ (t.body or '')|lower }}">
         <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline;">
           <h3 style="margin:0; font-size:1.05rem;">{{ t.title or '(sans titre)' }}</h3>
           <div class="text-muted" style="white-space:nowrap;">{{ t.date_dt.strftime('%d/%m/%Y %H:%M') }}</div>
@@ -29,5 +100,6 @@
       </article>
     {% endfor %}
   </div>
+
 {% endif %}
 {% endblock %}

@@ -581,6 +581,23 @@ html[data-theme="dark"] .badge.user {
   color: var(--text);
 }
 
+html[data-theme="dark"] .input  {
+  background: var(--card) !important;
+}
+
+html[data-theme="dark"] .textarea {
+  background: var(--card) !important;
+}
+
+html[data-theme="dark"] .checkbox-pill {
+  background: var(--card) !important;
+}
+
+html[data-theme="dark"] .chip {
+  background: var(--card) !important;
+}
+
+
 /* ==========================================================
    ✨ Pastel v2+ Motion Layer (Slide-in & Fade-up)
    ========================================================== */
@@ -665,4 +682,85 @@ h3 {
     animation: none !important;
     transition: none !important;
   }
+}
+
+.grid > article.card {
+  display:flex; flex-direction:column;
+  min-height: 320px;   /* adjust to your content */
+}
+
+/* --- NAV PILL ANTI-ALIAS / CLIP FIX -------------------------------------- */
+.nav, .nav-row, .nav-menu, .header-actions { overflow: visible !important; }
+
+.button, .btn-nav {
+  position: relative;
+  border-radius: 9999px;
+  border: 1px solid transparent;      /* keep layout but avoid AA on arc */
+  background-clip: padding-box;       /* keep gradient inside the arc */
+  will-change: transform;             /* better compositing without seams */
+}
+
+/* keep a crisp outline as an inset 'border' */
+.button::before, .btn-nav::before {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(205,230,255,.95) inset;  /* hairline border */
+}
+
+/* avoid the 1px hover translate that causes subpixel clipping */
+.button:hover, .btn-nav:hover {
+  transform: none;                     /* was translateY(-1px) */
+  box-shadow: var(--shadow);           /* keep some feedback */
+}
+
+/* --- MOBILE INPUT LEGIBILITY --------------------------------------------- */
+.input, .textarea, select {
+  color: var(--text) !important;       /* #0d1b2a */
+  background: #fff !important;
+}
+
+/* placeholder visible but subtle */
+.input::placeholder, .textarea::placeholder {
+  color: #9aa6b2; opacity: 1;
+}
+
+/* iOS/Android autofill can paint white text on white background */
+input:-webkit-autofill,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: #0d1b2a !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;  /* force white bg */
+  transition: background-color 99999s ease-out 0s;    /* keep the color */
+}
+
+/* on very small viewports, ensure inputs always render readable */
+@media (max-width: 720px) {
+  .input, .textarea, select {
+    color: #0d1b2a !important;
+    background: #ffffff !important;
+    border-color: #dfe9f4 !important;
+  }
+}
+
+/* Keep hover animation but avoid the top-edge clip */
+:where(.button, .btn-nav) {
+  position: relative;
+  border-radius: 9999px;
+  transition: transform .14s cubic-bezier(.2,.8,.2,1),
+              box-shadow .18s ease, filter .18s ease;
+  will-change: transform, box-shadow, filter;
+  backface-visibility: hidden;
+}
+
+:where(.button, .btn-nav)::after {
+  /* subtle inner hairline that prevents the 1px 'shave' at top */
+  content:""; position:absolute; inset:0; border-radius:inherit;
+  pointer-events:none; box-shadow: inset 0 0 0 1px rgba(205,230,255,.9);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where(.button, .btn-nav):hover { transform: translateY(-1px); }
+  :where(.button, .btn-nav):active { transform: translateY(0); }
 }
