@@ -17,7 +17,7 @@ def _decrypt_for_export(t: dict) -> dict:
     out = dict(t)
     if t.get("ciphertext") and t.get("cipher_nonce"):
         try:
-            clear = cserv.decrypt_text_payload(t["created_by"], t["ciphertext"], t["cipher_nonce"])
+            clear = cserv.compat_decrypt_and_rewrap_row(t)
             out["title"] = clear.get("title") or t.get("title")
             out["body"] = clear.get("body") or ""
             out["context"] = clear.get("context")
