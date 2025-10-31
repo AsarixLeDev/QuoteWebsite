@@ -583,6 +583,7 @@ html[data-theme="dark"] .badge.user {
 
 html[data-theme="dark"] .input  {
   background: var(--card) !important;
+  color: var(--text) !important;
 }
 
 html[data-theme="dark"] .textarea {
