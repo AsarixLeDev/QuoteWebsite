@@ -3,6 +3,7 @@ import re
 import secrets
 import urllib.parse
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, abort
 from flask_login import login_required, current_user
@@ -25,6 +26,88 @@ texts_bp = Blueprint("texts", __name__)
 # Limite d'upload lue depuis la config JSON
 _limits = (get_conf(read_db()).get("limits") or {})
 MAX_UPLOAD_MB = int(_limits.get("upload_max_mb", 32))
+
+_SPOTIFY_RE = re.compile(
+    r"open\.spotify\.com/(?:intl-[^/]+/)?(track|album|playlist)/([A-Za-z0-9]{10,})",
+    re.IGNORECASE,
+)
+
+def _expand_spotify_short(url: str, timeout: float = 6.0) -> str | None:
+    """Suit les redirections des short-links (spotify.link / spoti.fi)."""
+    try:
+        import requests  # type: ignore
+        h = {"User-Agent": "curl/7.88"}
+        # HEAD d'abord, puis GET si besoin
+        r = requests.head(url, allow_redirects=True, timeout=timeout, headers=h)
+        final = r.url
+        if _is_short(final):
+            r = requests.get(url, allow_redirects=True, timeout=timeout, headers=h)
+            final = r.url
+        return final
+    except Exception:
+        # Fallback urllib
+        try:
+            import urllib.request, urllib.parse
+            class _NoRedirect(urllib.request.HTTPErrorProcessor):
+                def http_response(self, req, resp): return resp
+                https_response = http_response
+            opener = urllib.request.build_opener(_NoRedirect)
+            cur = url
+            for _ in range(10):
+                req = urllib.request.Request(cur, method="HEAD", headers={"User-Agent":"curl/7.88"})
+                resp = opener.open(req, timeout=timeout)
+                loc = resp.headers.get("Location")
+                if not loc: break
+                cur = urllib.parse.urljoin(cur, loc)
+            return cur
+        except Exception:
+            return None
+
+def _is_short(u: str) -> bool:
+    try:
+        nl = urlparse(u).netloc.lower()
+        return nl in {"spotify.link", "spoti.fi"}
+    except Exception:
+        return False
+
+def parse_spotify_embed(url: str):
+    """
+    Accepte:
+      - https://open.spotify.com/{track|album|playlist}/ID[?...]
+      - https://open.spotify.com/intl-xx/{...}/ID
+      - https://spotify.link/XXXX (ou https://spoti.fi/XXXX)
+    Retourne: {"type":"spotify","kind":kind,"id":sid,"src": ".../embed/{kind}/{sid}"} ou None.
+    """
+    s = (url or "").strip()
+    if not s:
+        return None
+
+    # Étendre les short-links si nécessaire
+    netloc = urlparse(s).netloc.lower()
+    if netloc in {"spotify.link", "spoti.fi"}:
+        expanded = _expand_spotify_short(s)
+        if expanded:
+            s = expanded
+
+    # Normaliser sans query/fragment
+    try:
+        u = urlparse(s)
+        s_no_q = urlunparse((u.scheme, u.netloc, u.path, "", "", ""))
+    except Exception:
+        s_no_q = s
+
+    m = _SPOTIFY_RE.search(s_no_q) or _SPOTIFY_RE.search(s)
+    if not m:
+        return None
+
+    kind, sid = m.groups()
+    kind = kind.lower()
+    return {
+        "type": "spotify",
+        "kind": kind,
+        "id": sid,
+        "src": f"https://open.spotify.com/embed/{kind}/{sid}",
+    }
 
 
 def _yt_map_set(text_id: int, job_id: str) -> None:
@@ -163,10 +246,9 @@ def _detect_embed(url: str | None) -> dict:
             return {"type": "audio_direct", "src": u}
 
     # Spotify (support /intl-xx/)
-    m = re.search(r"open\.spotify\.com/(?:intl-[a-z]{2}/)?(track|playlist|album)/([A-Za-z0-9]+)", u)
-    if m:
-        kind, sid = m.groups()
-        return {"type": "spotify", "kind": kind, "id": sid, "src": f"https://open.spotify.com/embed/{kind}/{sid}"}
+    spot = parse_spotify_embed(u)
+    if spot:
+        return spot
 
     # YouTube (watch, youtu.be, shorts)
     try:

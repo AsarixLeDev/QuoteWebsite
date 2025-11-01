@@ -207,7 +207,7 @@ def _media_badge(music_url: str | None, music_original_url: str | None):
     # 2) Liens externes (comme avant)
     if "youtube.com" in u or "youtu.be" in u:
         return {"icon": "▶️", "label": "YouTube"}
-    if "open.spotify.com" in u:
+    if "open.spotify.com" in u or "spotify.link" in u:
         return {"icon": "🟢", "label": "Spotify"}
     if "soundcloud.com" in u:
         return {"icon": "☁️", "label": "SoundCloud"}
