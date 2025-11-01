@@ -43,7 +43,8 @@ def request_reset():
         flash("Attention aux fausses adresses. La nôtre est " + str(from_addr) + "." )
         print("Sending message...")
         user = store.get_user(username)
-        _send_reset_email(user, link)
+        print(user)
+        _send_reset_email(user, link, dry_run=True)
         return redirect(url_for("core.login"))
     return render_template("auth_reset_request.html")
 

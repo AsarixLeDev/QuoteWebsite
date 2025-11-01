@@ -35,7 +35,9 @@ def forgot_password():
         username_or_email = (request.form.get("login") or "").strip()
         with SessionLocal.begin() as s:
             q = select(User).where( (User.username==username_or_email) | (User.email==username_or_email) )
+            print(q)
             u = s.scalar(q)
+            print(u)
             if u:
                 token = secrets.token_urlsafe(32)
                 exp = datetime.utcnow() + timedelta(hours=2)
