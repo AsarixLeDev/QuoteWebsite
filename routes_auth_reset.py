@@ -44,7 +44,7 @@ def request_reset():
         print("Sending message...")
         user = store.get_user(username)
         print(user)
-        _send_reset_email(user, link, dry_run=True)
+        _send_reset_email(user, link, dry_run=False)
         return redirect(url_for("core.login"))
     return render_template("auth_reset_request.html")
 
