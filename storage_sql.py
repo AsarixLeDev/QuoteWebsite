@@ -201,6 +201,21 @@ def list_texts_accessible(username: str) -> list[dict]:
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS password_resets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          used INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        """)
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);")
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);")
+
 # ---------- Helpers (users) ----------
 def _pepper() -> str:
     return (get_conf(read_db()).get("password_pepper") or "")
